@@ -1,15 +1,23 @@
 import { Stack } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
 import { LogBox } from 'react-native';
 import Toast from 'react-native-toast-message';
 import { Provider } from '@/components/Provider';
+import { useAuth } from '@/contexts/AuthContext';
+import PinScreen from '@/screens/pin';
 
 import '../global.css';
 
 LogBox.ignoreLogs([
   "TurboModuleRegistry.getEnforcing(...): 'RNMapsAirModule' could not be found",
-  // 添加其它想暂时忽略的错误或警告信息
 ]);
+
+function LockGate() {
+  const { loaded, isUnlocked } = useAuth();
+  // PIN 未就绪前保持空白，避免闪烁
+  if (!loaded) return null;
+  if (isUnlocked) return null;
+  return <PinScreen />;
+}
 
 export default function RootLayout() {
   return (
@@ -19,11 +27,14 @@ export default function RootLayout() {
           animation: 'slide_from_right',
           gestureEnabled: true,
           gestureDirection: 'horizontal',
-          headerShown: false
+          headerShown: false,
         }}
       >
-        <Stack.Screen name="index" options={{ title: "" }} />
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="person" options={{ title: '' }} />
+        <Stack.Screen name="analyze" options={{ title: '' }} />
       </Stack>
+      <LockGate />
       <Toast />
     </Provider>
   );

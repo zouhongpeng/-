@@ -1,55 +1,131 @@
 // @ts-nocheck
 /**
- * 通用认证上下文
- *
- * 基于固定的 API 接口实现，可复用到其他项目
- * 其他项目使用时，只需修改 @api 的导入路径指向项目的 api 模块
- *
- * 注意：
- * - 如果需要登录/鉴权场景，请扩展本文件，完善 login/logout、token 管理、用户信息获取与刷新等逻辑
- * - 将示例中的占位实现替换为项目实际的接口调用与状态管理
+ * PIN 锁认证上下文
+ * - 首次使用：设置 4 位 PIN
+ * - 之后：输入 PIN 解锁
+ * - token 存 AsyncStorage，持久化保持解锁态
  */
-import React, { createContext, useContext, ReactNode } from "react";
+import React, { createContext, useContext, useEffect, useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { api, setPinToken, getPinToken } from "@/utils/api";
 
-interface UserOut {
-
-}
+const TOKEN_KEY = "reply-assistant.pin-token";
 
 interface AuthContextType {
-  user: UserOut | null;
+  loaded: boolean; // 是否已从后端获取初始化状态
+  initialized: boolean | null; // PIN 是否已初始化
+  isUnlocked: boolean;
   token: string | null;
-  isAuthenticated: boolean;
-  isLoading: boolean;
-  login: (token: string) => Promise<void>;
-  logout: () => Promise<void>;
-  updateUser: (userData: Partial<UserOut>) => void;
+  unlock: (pin: string) => Promise<void>;
+  setup: (pin: string) => Promise<void>;
+  lock: () => Promise<void>;
+  refetch: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const AuthContext = createContext<AuthContextType>({
+  loaded: false,
+  initialized: null,
+  isUnlocked: false,
+  token: null,
+  unlock: async () => { throw new Error("Auth not ready"); },
+  setup: async () => { throw new Error("Auth not ready"); },
+  lock: async () => { throw new Error("Auth not ready"); },
+  refetch: async () => { return; },
+});
 
-export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const value: AuthContextType = {
-    user: null,
-    token: null,
-    isAuthenticated: false,
-    isLoading: false,
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [loaded, setLoaded] = useState(false);
+  const [initialized, setInitialized] = useState<boolean | null>(null);
+  const [token, setToken] = useState<string | null>(null);
 
-    // 登录逻辑，根据项目实际情况实现
-    login: async (token: string) => {}, // eslint-disable-line @typescript-eslint/no-empty-function
-
-    // 登出逻辑，根据项目实际情况实现
-    logout: async () => {}, // eslint-disable-line @typescript-eslint/no-empty-function
-
-    // 更新用户信息，根据项目实际情况实现
-    updateUser: () => {}, // eslint-disable-line @typescript-eslint/no-empty-function
+  // 从 AsyncStorage 恢复 token
+  const restoreToken = async () => {
+    try {
+      const t = await AsyncStorage.getItem(TOKEN_KEY);
+      if (t) {
+        setPinToken(t);
+        setToken(t);
+      }
+    } catch {
+      // 忽略恢复失败
+    }
   };
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+
+  const fetchStatus = async () => {
+    try {
+      const st = await api.pinStatus();
+      setInitialized(st.initialized);
+    } catch {
+      setInitialized(null);
+    }
+  };
+
+  useEffect(() => {
+    (async () => {
+      await restoreToken();
+      await fetchStatus();
+      setLoaded(true);
+    })();
+  }, []);
+
+  const persist = async (t: string) => {
+    setPinToken(t);
+    setToken(t);
+    try {
+      await AsyncStorage.setItem(TOKEN_KEY, t);
+    } catch {
+      // 忽略
+    }
+  };
+
+  const unlock = async (pin: string) => {
+    const res = await api.pinUnlock(pin);
+    await persist(res.token);
+    setInitialized(true);
+  };
+
+  const setup = async (pin: string) => {
+    const res = await api.pinSetup(pin);
+    await persist(res.token);
+    setInitialized(true);
+  };
+
+  const lock = async () => {
+    setPinToken(null);
+    setToken(null);
+    try {
+      await AsyncStorage.removeItem(TOKEN_KEY);
+    } catch {
+      // 忽略
+    }
+  };
+
+  const refetch = async () => {
+    await fetchStatus();
+  };
+
+  return (
+    <AuthContext.Provider
+      value={{
+        loaded,
+        initialized,
+        isUnlocked: !!(token && getPinToken()),
+        token,
+        unlock,
+        setup,
+        lock,
+        refetch,
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
+  );
 };
 
 export const useAuth = (): AuthContextType => {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
+  const ctx = useContext(AuthContext);
+  if (ctx === undefined) {
     throw new Error("useAuth must be used within an AuthProvider");
   }
-  return context;
+  return ctx;
 };

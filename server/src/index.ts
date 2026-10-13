@@ -1,20 +1,537 @@
 import express from "express";
+import type { Request, Response } from "express";
 import cors from "cors";
+import multer from "multer";
+import { z } from "zod";
+import dayjs from "dayjs";
+
+import { getSupabaseClient } from "./storage/database/supabase-client";
+import { runAnalysis, prepareAnonymized, summerizeRecords, shouldModerate, MODERATION_REPLY, type GrowthMode } from "./ai/analysis";
+import { recognizeImage } from "./ai/deepseek";
+import { generateWeeklyReport } from "./ai/report";
+import { sha256, anonymize } from "./ai/anonymize";
 
 const app = express();
 const port = process.env.PORT || 9091;
 
 // Middleware
 app.use(cors());
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
-app.get('/api/v1/health', (req, res) => {
-  console.log('Health check success');
-  res.status(200).json({ status: 'ok' });
+const db = getSupabaseClient();
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+// ============ 工具 ============
+const ok = (res: Response, data: unknown, status = 200) => res.status(status).json({ code: 0, data });
+const fail = (res: Response, msg: string, status = 400, code = 1) =>
+  res.status(status).json({ code, msg });
+
+// PIN 状态（内存简单会话）
+let sessionPinHash: string | null = null;
+let pinInitialized: boolean | null = null;
+
+async function loadPinState() {
+  const { data, error } = await db.from("settings").select("pin_hash, growth_mode, id").limit(1);
+  if (error) throw error;
+  pinInitialized = !!(data && data.length > 0);
+  if (data && data.length > 0) sessionPinHash = data[0].pin_hash as string;
+}
+
+/** 校验 4 位 PIN 签名（简单鉴权） */
+function checkPin(req: Request): boolean {
+  const token = req.headers["x-pin-token"] as string | undefined;
+  return !!token && !!sessionPinHash && token === sessionPinHash;
+}
+
+const requirePin: express.RequestHandler = (req, res, next) => {
+  if (!pinInitialized) return next(); // 首次使用，需要先设 PIN
+  if (!checkPin(req)) return fail(res, "请先解锁", 401, 401);
+  next();
+};
+
+app.get("/api/v1/health", (req, res) => {
+  res.status(200).json({ status: "ok" });
 });
 
+// ============ PIN 相关 ============
+// 查询是否需要初始化 PIN
+app.get("/api/v1/pin/status", async (req, res) => {
+  try {
+    await loadPinState();
+    ok(res, { initialized: !!pinInitialized });
+  } catch (e) {
+    fail(res, "读取设置失败", 500, 500);
+  }
+});
+
+// 首次设置 PIN（4位）
+app.post("/api/v1/pin/setup", async (req, res) => {
+  try {
+    const schema = z.object({ pin: z.string().regex(/^\d{4}$/) });
+    const { pin } = schema.parse(req.body);
+    const hash = sha256(pin);
+    // 若已初始化，不允许重复初始化（防覆盖）
+    if (pinInitialized) {
+      const token = req.headers["x-pin-token"] as string | undefined;
+      if (token !== sessionPinHash) return fail(res, "已初始化过 PIN", 403, 403);
+      // 允许在已解锁状态下修改 PIN
+      const { error } = await db.from("settings").update({ pin_hash: hash }).eq("id", 1);
+      if (error) throw error;
+      sessionPinHash = hash;
+      return ok(res, { success: true, token: hash, growth_mode: (await getGrowthMode()) });
+    }
+    const { data, error } = await db.from("settings").insert({ pin_hash: hash, growth_mode: "canned" }).select("id").single();
+    if (error) throw error;
+    pinInitialized = true;
+    sessionPinHash = hash;
+    ok(res, { success: true, token: hash, growth_mode: "canned" });
+  } catch (e: any) {
+    fail(res, e?.message || "设置 PIN 失败", 400);
+  }
+});
+
+// 校验 PIN 解锁
+app.post("/api/v1/pin/unlock", async (req, res) => {
+  try {
+    await loadPinState();
+    const schema = z.object({ pin: z.string() });
+    const { pin } = schema.parse(req.body);
+    const hash = sha256(pin);
+    if (hash === sessionPinHash) {
+      ok(res, { token: hash, growth_mode: (await getGrowthMode()) });
+    } else {
+      fail(res, "PIN 不正确", 401, 401);
+    }
+  } catch (e: any) {
+    fail(res, e?.message || "解锁失败", 400);
+  }
+});
+
+async function getGrowthMode(): Promise<GrowthMode> {
+  const { data } = await db.from("settings").select("growth_mode").limit(1);
+  return (data?.[0]?.growth_mode as GrowthMode) ?? "canned";
+}
+
+// ============ 人物档案 ============
+app.get("/api/v1/people", requirePin, async (req, res) => {
+  try {
+    const { data, error } = await db
+      .from("people")
+      .select("id, name, relationship, background, created_at, updated_at")
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    // 计算最近互动时间 = 最近一次分析时间
+    const withRecent = await Promise.all(data!.map(async (p: any) => {
+      const { data: ana, error: e2 } = await db
+        .from("analysis_records")
+        .select("created_at")
+        .eq("person_id", p.id)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (e2) throw e2;
+      return { ...p, last_interaction_at: ana?.[0]?.created_at ?? null };
+    }));
+    ok(res, withRecent);
+  } catch (e: any) {
+    fail(res, e?.message || "查询失败", 500, 500);
+  }
+});
+
+app.get("/api/v1/people/:id", requirePin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data: person, error } = await db.from("people").select("*").eq("id", id).maybeSingle();
+    if (error) throw error;
+    if (!person) return fail(res, "档案不存在", 404, 404);
+    const { data: dates } = await db.from("important_dates").select("*").eq("person_id", id).order("month_day", { ascending: true });
+    ok(res, { ...person, dates: dates ?? [] });
+  } catch (e: any) {
+    fail(res, e?.message || "查询失败", 500, 500);
+  }
+});
+
+app.post("/api/v1/people", requirePin, async (req, res) => {
+  try {
+    const schema = z.object({
+      name: z.string().min(1),
+      relationship: z.string().optional().default(""),
+      background: z.string().optional().default(""),
+      dates: z.array(z.object({ name: z.string(), month_day: z.string() })).optional().default([]),
+    });
+    const body = schema.parse(req.body);
+    const { data, error } = await db.from("people").insert({
+      name: body.name,
+      relationship: body.relationship,
+      background: body.background,
+      updated_at: dayjs().toISOString(),
+    }).select("id").single();
+    if (error) throw error;
+    const personId = data.id as string;
+    await insertDates(personId, body.dates);
+    ok(res, { id: personId }, 201);
+  } catch (e: any) {
+    fail(res, e?.message || "创建失败", 400);
+  }
+});
+
+app.put("/api/v1/people/:id", requirePin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const schema = z.object({
+      name: z.string().min(1).optional(),
+      relationship: z.string().optional(),
+      background: z.string().optional(),
+      dates: z.array(z.object({ name: z.string(), month_day: z.string() })).optional(),
+    });
+    const body = schema.parse(req.body);
+    const patch: any = { updated_at: dayjs().toISOString() };
+    if (body.name !== undefined) patch.name = body.name;
+    if (body.relationship !== undefined) patch.relationship = body.relationship;
+    if (body.background !== undefined) patch.background = body.background;
+    const { error } = await db.from("people").update(patch).eq("id", id);
+    if (error) throw error;
+    if (body.dates) {
+      const { error: e2 } = await db.from("important_dates").delete().eq("person_id", id);
+      if (e2) throw e2;
+      await insertDates(id as string, body.dates);
+    }
+    ok(res, { success: true });
+  } catch (e: any) {
+    fail(res, e?.message || "更新失败", 400);
+  }
+});
+
+app.delete("/api/v1/people/:id", requirePin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { error } = await db.from("people").delete().eq("id", id);
+    if (error) throw error;
+    ok(res, { success: true });
+  } catch (e: any) {
+    fail(res, e?.message || "删除失败", 500, 500);
+  }
+});
+
+async function insertDates(personId: string, dates: { name: string; month_day: string }[]) {
+  for (const d of dates) {
+    const { error } = await db.from("important_dates").insert({ person_id: personId, name: d.name, month_day: d.month_day });
+    if (error) throw error;
+  }
+}
+
+// ============ 分析 ============
+app.post("/api/v1/analyze", requirePin, async (req, res) => {
+  try {
+    const schema = z.object({
+      person_id: z.string(),
+      chat_input: z.string().optional().default(""),
+      thought_input: z.string().optional().default(""),
+      my_reply: z.string().optional().default(""), // 点评模式下用户自己的回复
+    });
+    const body = schema.parse(req.body);
+
+    // 加载人物 + 最近3次分析
+    const { data: person, error: pe } = await db.from("people").select("*").eq("id", body.person_id).maybeSingle();
+    if (pe) throw pe;
+    if (!person) return fail(res, "人物不存在", 404, 404);
+
+    const growthMode = await getGrowthMode();
+
+    // 24小时内分析次数（含正在生成）
+    const since = dayjs().subtract(24, "hour").toISOString();
+    const { data: recentAll, error: re } = await db
+      .from("analysis_records")
+      .select("id, created_at, status, temp_label, temp_reason, result, thought_input")
+      .eq("person_id", body.person_id)
+      .gte("created_at", since);
+    if (re) throw re;
+    const recent24 = (recentAll ?? []).filter((r: any) => r.status !== "failed");
+
+    // 节制：第 3 次分析劝停
+    if (shouldModerate(recent24.length)) {
+      return ok(res, { moderated: true, message: MODERATION_REPLY });
+    }
+
+    // 组装脱敏输入
+    const recent3 = [...recent24].slice(-3);
+    const recent3ForContext = (recentAll ?? [])
+      .sort((a: any, b: any) => (a.created_at > b.created_at ? -1 : 1))
+      .slice(0, 3)
+      .map((r: any) => ({ temp_label: r.temp_label, temp_reason: r.temp_reason, result: r.result }));
+
+    const anonymized = prepareAnonymized({
+      personName: person.name,
+      background: person.background,
+      chatRecord: body.chat_input,
+      myThought: growthMode === "critique" ? (body.my_reply || body.thought_input) : body.thought_input,
+    });
+
+    // 记录占位（生成中）
+    const placeholder = {
+      person_id: body.person_id,
+      chat_input: body.chat_input,
+      thought_input: body.thought_input,
+      result: {},
+      temp_label: "温",
+      temp_reason: "",
+      status: "gen",
+    };
+    const { data: inserted } = await db.from("analysis_records").insert(placeholder).select("id").single();
+    const recordId = inserted?.id as string;
+
+    // 立即返回 id，前端轮询
+    ok(res, { record_id: recordId, person_id: body.person_id, growth_mode: growthMode });
+
+    // 后台异步调用 AI（不阻塞响应）；失败则标记 failed
+    (async () => {
+      try {
+        const outcome = await runAnalysis({
+          personName: person.name,
+          background: anonymized.background,
+          recentSummaries: summerizeRecords(recent3ForContext),
+          chatRecord: anonymized.chatRecord,
+          myThought: anonymized.myThought,
+          growthMode,
+        });
+        const { error } = await db.from("analysis_records").update({
+          result: outcome as any,
+          temp_label: outcome.temperature.label,
+          temp_reason: outcome.temperature.reason,
+          status: "done",
+        }).eq("id", recordId);
+        if (error) throw error;
+        // 写温度趋势点
+        await db.from("temperature_points").insert({
+          person_id: body.person_id,
+          label: outcome.temperature.label,
+          reason: outcome.temperature.reason,
+        });
+      } catch (err) {
+        await db.from("analysis_records").update({ status: "failed" }).eq("id", recordId);
+        console.error("AI 分析失败:", err);
+      }
+    })();
+  } catch (e: any) {
+    fail(res, e?.message || "分析失败", 400);
+  }
+});
+
+// 轮询某条记录
+app.get("/api/v1/analysis/:id", requirePin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data, error } = await db.from("analysis_records").select("*").eq("id", id).maybeSingle();
+    if (error) throw error;
+    if (!data) return fail(res, "记录不存在", 404, 404);
+    ok(res, data);
+  } catch (e: any) {
+    fail(res, e?.message || "查询失败", 500, 500);
+  }
+});
+
+// 标记某条建议"用了/没用上"
+app.put("/api/v1/analysis/:id/mark", requirePin, async (req, res) => {
+  try {
+    const schema = z.object({ index: z.number(), used: z.boolean() });
+    const { index, used } = schema.parse(req.body);
+    const { id } = req.params;
+    const { data, error } = await db.from("analysis_records").select("result").eq("id", id).maybeSingle();
+    if (error) throw error;
+    if (!data) return fail(res, "记录不存在", 404, 404);
+    const result = data.result as any;
+    const marks = result.marks ?? (result.marks = {});
+    marks[String(index)] = used;
+    const { error: e2 } = await db.from("analysis_records").update({ result }).eq("id", id);
+    if (e2) throw e2;
+    ok(res, { success: true });
+  } catch (e: any) {
+    fail(res, e?.message || "标记失败", 400);
+  }
+});
+
+// ============ 时间线 ============
+app.get("/api/v1/people/:id/analyses", requirePin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data, error } = await db
+      .from("analysis_records")
+      .select("id, chat_input, thought_input, result, temp_label, temp_reason, status, created_at")
+      .eq("person_id", id)
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    ok(res, data ?? []);
+  } catch (e: any) {
+    fail(res, e?.message || "查询失败", 500, 500);
+  }
+});
+
+app.delete("/api/v1/analysis/:id", requirePin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { error } = await db.from("analysis_records").delete().eq("id", id);
+    if (error) throw error;
+    ok(res, { success: true });
+  } catch (e: any) {
+    fail(res, e?.message || "删除失败", 500, 500);
+  }
+});
+
+// ============ 温度趋势 ============
+app.get("/api/v1/people/:id/temperatures", requirePin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data, error } = await db
+      .from("temperature_points")
+      .select("label, reason, created_at")
+      .eq("person_id", id)
+      .order("created_at", { ascending: true });
+    if (error) throw error;
+    ok(res, data ?? []);
+  } catch (e: any) {
+    fail(res, e?.message || "查询失败", 500, 500);
+  }
+});
+
+// ============ 截图识别 ============
+app.post("/api/v1/recognize", requirePin, upload.single("image"), async (req, res) => {
+  try {
+    const personName = (req.body.person_name as string) ?? "";
+    if (!req.file) return fail(res, "未上传图片", 400);
+    const dataUri = `data:${req.file.mimetype || "image/png"};base64,${req.file.buffer.toString("base64")}`;
+    const system = `你是聊天截图文字识别助手。请识别截图中的对话，并按说话人分离。对方称呼为"${personName || "对方"}"。要求输出 JSON：
+{"messages":[{"speaker":"我|对方","text":"说话内容"}]}
+只识别对话气泡里的文字，忽略背景、时间、红点等无关元素。不要编造内容。`;
+    // 视觉输入走 DeepSeek；若模型不支持则抛错 → 前端降级手动粘贴
+    const content = await recognizeImage(system, "请识别并输出 JSON。", dataUri);
+    let messages: { speaker: string; text: string }[] = [];
+    try {
+      const parsed = JSON.parse(content.replace(/```json|```/g, ""));
+      messages = parsed.messages ?? [];
+    } catch {
+      const fence = content.match(/"messages"\s*:\s*\[([\s\S]*?)\]/);
+      if (!fence) throw new Error("识别结果无法解析");
+    }
+    ok(res, { messages });
+  } catch (e: any) {
+    fail(res, e?.message || "识别失败，请手动粘贴", 500, 500);
+  }
+});
+
+// ============ 周报 ============
+app.get("/api/v1/reports", requirePin, async (req, res) => {
+  try {
+    const { data, error } = await db.from("weekly_reports").select("*").order("week_start", { ascending: false });
+    if (error) throw error;
+    ok(res, data ?? []);
+  } catch (e: any) {
+    fail(res, e?.message || "查询失败", 500, 500);
+  }
+});
+
+app.post("/api/v1/reports/generate", requirePin, async (req, res) => {
+  try {
+    // 本周一
+    const weekStart = dayjs().startOf("week").format("YYYY-MM-DD");
+    const weekEnd = dayjs().endOf("week").toISOString();
+    // 取本周全部分析（含已完成的心智）
+    const { data: analyses, error } = await db
+      .from("analysis_records")
+      .select("id, person_id, result, status, temp_label, temp_reason, created_at")
+      .gte("created_at", dayjs(weekStart).toISOString())
+      .lte("created_at", weekEnd)
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+
+    // 人物统计
+    const { data: people } = await db.from("people").select("id, name");
+    const personMap = new Map((people ?? []).map((p: any) => [p.id, p.name]));
+
+    const done = (analyses ?? []).filter((a: any) => a.status === "done" && a.result && a.result.thoughts);
+    const personStats = new Map<string, { name: string; tempCount: Record<string, number>; lastTemp: string; lastReason: string; count: number }>();
+    const weekSummary: string[] = [];
+    for (const a of done) {
+      const name = personMap.get(a.person_id) ?? "对方";
+      const st = personStats.get(a.person_id) ?? { name, tempCount: { 热: 0, 温: 0, 冷: 0 }, lastTemp: "", lastReason: "", count: 0 };
+      st.count++;
+      const label = (["热", "温", "冷"].includes(a.temp_label) ? a.temp_label : "温") as "热" | "温" | "冷";
+      st.tempCount[label] = (st.tempCount[label] ?? 0) + 1;
+      st.lastTemp = label;
+      st.lastReason = a.temp_reason || "";
+      personStats.set(a.person_id, st);
+      const points = (a.result.thoughts ?? []).map((t: any) => t.point).join("；");
+      weekSummary.push(`【${name}】${points}`);
+    }
+
+    if (done.length === 0) {
+      return ok(res, { empty: true });
+    }
+
+    const content = await generateWeeklyReport({
+      personRecords: Array.from(personStats.values()).map((s) => ({
+        name: s.name,
+        temp_label: s.lastTemp,
+        temp_reason: s.lastReason,
+        count: s.count,
+      })),
+      weekSummary: weekSummary.join("\n"),
+    });
+
+    const { data: ins, error: ie } = await db.from("weekly_reports").insert({
+      week_start: weekStart,
+      content: { ...content, personCount: Array.from(personStats.values()).map((s) => ({ name: s.name, count: s.count })) },
+    }).select("id").single();
+    if (ie) throw ie;
+    ok(res, { id: ins?.id, content }, 201);
+  } catch (e: any) {
+    fail(res, e?.message || "生成周报失败", 500, 500);
+  }
+});
+
+// 成长模式设置
+app.put("/api/v1/settings/mode", requirePin, async (req, res) => {
+  try {
+    const schema = z.object({ mode: z.enum(["canned", "hint", "critique"]) });
+    const { mode } = schema.parse(req.body);
+    const { error } = await db.from("settings").update({ growth_mode: mode }).eq("id", 1);
+    if (error) throw error;
+    ok(res, { growth_mode: mode });
+  } catch (e: any) {
+    fail(res, e?.message || "设置失败", 400);
+  }
+});
+
+app.get("/api/v1/settings", requirePin, async (req, res) => {
+  try {
+    const mode = await getGrowthMode();
+    ok(res, { growth_mode: mode });
+  } catch (e: any) {
+    fail(res, e?.message || "查询失败", 500, 500);
+  }
+});
+
+// ============ 关键日期提醒（供前端定时查询） ============
+app.get("/api/v1/dates/upcoming", requirePin, async (req, res) => {
+  try {
+    const { data, error } = await db.from("important_dates").select("id, person_id, name, month_day").order("month_day", { ascending: true });
+    if (error) throw error;
+    const { data: people } = await db.from("people").select("id, name");
+    const nameMap = new Map((people ?? []).map((p: any) => [p.id, p.name]));
+    const today = dayjs();
+    const upcoming = (data ?? []).map((d: any) => {
+      const [m, day] = d.month_day.split("-").map((x: string) => parseInt(x));
+      let next = dayjs().month(m - 1).date(day).year(today.year());
+      if (next.isBefore(today, "day")) next = next.add(1, "year");
+      const diff = next.diff(today, "day");
+      return { ...d, person_name: nameMap.get(d.person_id) ?? "对方", remind_in: diff, date: next.format("M月D日") };
+    }).sort((a: any, b: any) => a.remind_in - b.remind_in);
+    ok(res, upcoming);
+  } catch (e: any) {
+    fail(res, e?.message || "查询失败", 500, 500);
+  }
+});
 
 app.listen(port, () => {
+  loadPinState().catch((e) => console.error("加载 PIN 失败:", e));
   console.log(`Server listening at http://localhost:${port}/`);
 });
