@@ -1,6 +1,6 @@
 import React, { useCallback, useRef, useState } from 'react';
 import {
-  View, Text, TouchableOpacity, TextInput, ScrollView, Alert, ActivityIndicator, Platform, Modal,
+  View, Text, TouchableOpacity, TextInput, ScrollView, Alert, ActivityIndicator, Platform, Modal, StyleSheet,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
@@ -15,7 +15,7 @@ interface AnalyzeProps {
   person_name?: string;
 }
 
-const TEMP_COLOR: Record<string, string> = { 热: '#E4572E', 温: '#C9A227', 冷: '#5B7C99' };
+const TEMP_COLOR: Record<string, string> = { 热: '#E4572E', 温: '#C9A227', 冷: '#7A9BCE' };
 
 /**
  * 核心分析页
@@ -153,6 +153,13 @@ export default function AnalyzeScreen() {
 
   return (
     <Screen safeAreaEdges={['top', 'left', 'right', 'bottom']}>
+      {/* 私密感：柔和背景层（半透明暖雾） */}
+      <View style={StyleSheet.absoluteFill}>
+        <View className="absolute -top-24 -right-16 w-64 h-64 rounded-full bg-mist-soft" />
+        <View className="absolute top-40 -left-20 w-56 h-56 rounded-full bg-accent-soft" />
+        <View className="absolute bottom-0 right-0 w-40 h-40 rounded-full bg-mist-soft" />
+      </View>
+
       <View className="px-4 pt-2 pb-1 flex-row items-center justify-between">
         <TouchableOpacity onPress={() => { stopPolling(); router.back(); }} hitSlop={10} className="w-10 h-10 justify-center">
           <Text className="text-2xl text-foreground">‹</Text>
@@ -171,8 +178,8 @@ export default function AnalyzeScreen() {
         <View className="mt-5">
           <View className="flex-row items-center justify-between mb-2">
             <Text className="text-[15px] font-semibold text-foreground">聊天记录</Text>
-            <TouchableOpacity onPress={pickImage} className="px-3 h-8 bg-[#F1F1F1] rounded-full items-center justify-center">
-              {picking ? <ActivityIndicator size="small" color="#666" /> : <Text className="text-[12px] text-foreground">截图识别</Text>}
+            <TouchableOpacity onPress={pickImage} className="px-3 h-8 bg-accent-soft rounded-full items-center justify-center">
+              {picking ? <ActivityIndicator size="small" color="#E4572E" /> : <Text className="text-[12px] text-accent font-medium">截图识别</Text>}
             </TouchableOpacity>
           </View>
           <TextInput
@@ -182,7 +189,7 @@ export default function AnalyzeScreen() {
             placeholderTextColor="#C9C9C9"
             multiline
             textAlignVertical="top"
-            className="bg-white rounded-2xl border border-[#F0F0F0] px-4 py-3 text-[15px] text-foreground min-h-[150px]"
+            className="bg-surface rounded-2xl border border-border px-4 py-3 text-[15px] text-foreground min-h-[150px]"
           />
         </View>
 
@@ -195,7 +202,7 @@ export default function AnalyzeScreen() {
             placeholderTextColor="#C9C9C9"
             multiline
             textAlignVertical="top"
-            className="bg-white rounded-2xl border border-[#F0F0F0] px-4 py-3 text-[15px] text-foreground min-h-[90px]"
+            className="bg-surface rounded-2xl border border-border px-4 py-3 text-[15px] text-foreground min-h-[90px]"
           />
           <Text className="mt-1.5 text-[11px] text-muted">我的想法留空时，分析可能不全，建议先填。</Text>
         </View>
@@ -203,7 +210,7 @@ export default function AnalyzeScreen() {
         <TouchableOpacity
           onPress={() => submit()}
           disabled={loading}
-          className="mt-6 bg-foreground rounded-2xl h-13 py-4 items-center justify-center"
+          className="mt-6 bg-accent rounded-2xl py-4 items-center justify-center shadow-accent"
         >
           {loading ? <ActivityIndicator color="#fff" /> : <Text className="text-white font-semibold text-base">帮我分析</Text>}
         </TouchableOpacity>
@@ -218,14 +225,14 @@ export default function AnalyzeScreen() {
 
         {/* 结果区 */}
         {moderated && result?.message && (
-          <View className="mt-6 bg-white rounded-2xl border border-[#F0F0F0] px-5 py-6 items-center">
+          <View className="mt-6 rounded-2xl border border-border px-5 py-6 items-center" style={{ backgroundColor: 'rgba(255,253,251,0.92)' }}>
             <Text className="text-[15px] text-muted text-center leading-6">{result.message}</Text>
             <View className="mt-4 flex-row space-x-3">
-              <TouchableOpacity onPress={() => router.back()} className="px-5 h-10 bg-[#F1F1F1] rounded-full items-center justify-center">
-                <Text className="text-foreground text-[14px]">去做点什么</Text>
+              <TouchableOpacity onPress={() => router.back()} className="px-5 h-10 bg-accent-soft rounded-full items-center justify-center">
+                <Text className="text-accent text-[14px] font-medium">去做点什么</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => setModerated(false)} className="px-5 h-10 bg-foreground rounded-full items-center justify-center">
-                <Text className="text-white text-[14px]">冷静一下返回</Text>
+              <TouchableOpacity onPress={() => setModerated(false)} className="px-5 h-10 bg-accent rounded-full items-center justify-center">
+                <Text className="text-white text-[14px] font-medium">冷静一下返回</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -237,7 +244,7 @@ export default function AnalyzeScreen() {
       {/* 截图核对 Modal */}
       <Modal visible={shotStep === 'edit'} transparent animationType="slide" onRequestClose={() => setShotStep(null)}>
         <View className="flex-1 bg-black/30 justify-end">
-          <View className="bg-white rounded-t-3xl p-6 pb-8">
+          <View className="bg-surface rounded-t-3xl p-6 pb-8">
             <Text className="text-xl font-bold text-foreground mb-1">核对识别结果</Text>
             <Text className="text-[13px] text-muted mb-4">请确认说话人和内容，识别可能不准确，可直接修改。</Text>
             <ScrollView keyboardShouldPersistTaps="handled">
@@ -245,24 +252,24 @@ export default function AnalyzeScreen() {
                 <View key={i} className="flex-row items-center mb-2 space-x-2">
                   <TouchableOpacity
                     onPress={() => setShotMessages((ms) => ms.map((x, idx) => idx === i ? { ...x, speaker: x.speaker === '我' ? '对方' : '我' } : x ))}
-                    className="px-3 h-10 bg-[#F1F1F1] rounded-xl items-center justify-center"
+                    className="px-3 h-10 bg-accent-soft rounded-xl items-center justify-center"
                   >
-                    <Text className="text-[13px] text-foreground font-medium">{m.speaker === '我' ? '我' : personName}</Text>
+                    <Text className="text-[13px] text-accent font-medium">{m.speaker === '我' ? '我' : personName}</Text>
                   </TouchableOpacity>
                   <TextInput
                     value={m.text}
                     onChangeText={(t) => setShotMessages((ms) => ms.map((x, idx) => idx === i ? { ...x, text: t } : x))}
-                    className="flex-1 bg-[#F6F6F6] rounded-xl px-3 py-2 text-[15px] text-foreground"
+                    className="flex-1 bg-on-surface rounded-xl px-3 py-2 text-[15px] text-foreground"
                     multiline
                   />
                 </View>
               ))}
             </ScrollView>
             <View className="flex-row space-x-3 mt-4">
-              <TouchableOpacity onPress={() => setShotStep(null)} className="flex-1 h-12 rounded-xl bg-[#F1F1F1] items-center justify-center">
-                <Text className="text-foreground font-medium">取消</Text>
+              <TouchableOpacity onPress={() => setShotStep(null)} className="flex-1 h-12 rounded-xl bg-accent-soft items-center justify-center">
+                <Text className="text-accent font-medium">取消</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={useShot} className="flex-1 h-12 rounded-xl bg-foreground items-center justify-center">
+              <TouchableOpacity onPress={useShot} className="flex-1 h-12 rounded-xl bg-accent items-center justify-center">
                 <Text className="text-white font-medium">使用并填入</Text>
               </TouchableOpacity>
             </View>
@@ -282,7 +289,7 @@ function ResultView({ result, marks, onCopy, onMark }: any) {
   return (
     <View className="mt-8">
       {/* 关系温度 */}
-      <View className="bg-white rounded-2xl border border-[#F0F0F0] px-5 py-4 flex-row items-center">
+      <View className="rounded-2xl border border-border px-5 py-4 flex-row items-center" style={{ backgroundColor: 'rgba(255,253,251,0.92)' }}>
         <Text className="text-[13px] text-muted">关系温度</Text>
         <View className="ml-3 flex-row items-center">
           {['热', '温', '冷'].map((l) => (
@@ -298,19 +305,19 @@ function ResultView({ result, marks, onCopy, onMark }: any) {
       {/* 对面在想什么 */}
       <Section title="对面在想什么">
         {(result.thoughts || []).map((t: any, i: number) => (
-          <View key={i} className="bg-white rounded-2xl border border-[#F0F0F0] px-4 py-3 mb-2">
+          <View key={i} className="rounded-2xl border border-border px-4 py-3 mb-2" style={{ backgroundColor: 'rgba(255,253,251,0.92)' }}>
             <Text className="text-[15px] text-foreground font-medium">· {t.point}</Text>
             {!!t.evidence && <Text className="text-[12px] text-muted mt-1 leading-4">{t.evidence}</Text>}
           </View>
         ))}
       </Section>
 
-      {/* 建议回复 */}
+      {/* 建议回复 — iMessage 质感气泡 */}
       <Section title="建议回复" hint="点文字即可复制，可标记是否用了">
         {(result.suggestions || []).map((s: any, i: number) => {
           const used = marks[String(i)];
           return (
-            <View key={i} className="bg-white rounded-2xl border border-[#F0F0F0] px-4 py-3 mb-2">
+            <View key={i} style={{ backgroundColor: 'rgba(255,253,251,0.92)' }} className="rounded-2xl border border-border px-4 py-3 mb-2">
               <View className="flex-row items-center justify-between mb-1">
                 <Text className="text-[12px] text-accent font-medium">〔{s.style}〕</Text>
                 <View className="flex-row items-center">
@@ -335,7 +342,7 @@ function ResultView({ result, marks, onCopy, onMark }: any) {
       {(result.notes || []).length > 0 && (
         <Section title="注意事项">
           {(result.notes || []).map((nt: string, i: number) => (
-            <View key={i} className="bg-white rounded-2xl border border-[#F0F0F0] px-4 py-3 mb-2">
+            <View key={i} className="rounded-2xl border border-border px-4 py-3 mb-2" style={{ backgroundColor: 'rgba(255,253,251,0.92)' }}>
               <Text className="text-[14px] text-foreground leading-5">· {nt}</Text>
             </View>
           ))}

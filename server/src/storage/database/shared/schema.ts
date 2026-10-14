@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
-  pgTable, text, varchar, timestamp, integer, jsonb, index, date, serial,
+  pgTable, text, varchar, timestamp, integer, jsonb, index, date, serial, boolean,
 } from "drizzle-orm/pg-core";
 import { createSchemaFactory } from "drizzle-zod";
 import { z } from "zod";
@@ -19,6 +19,7 @@ export const people = pgTable(
     name: varchar("name", { length: 64 }).notNull(),
     relationship: varchar("relationship", { length: 64 }).notNull().default(""),
     background: text("background").default(""),
+    avatar_color: varchar("avatar_color", { length: 32 }).default(""),
     created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -104,13 +105,14 @@ export const settings = pgTable(
     id: integer("id").primaryKey().default(1),
     pin_hash: varchar("pin_hash", { length: 128 }).notNull(),
     growth_mode: varchar("growth_mode", { length: 16 }).notNull().default("canned"), // canned/hint/critique
+    moderation: boolean("moderation").notNull().default(false), // 节制机制开关（默认关闭）
     updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   }
 );
 
 const { createInsertSchema: createCoercedInsertSchema } = createSchemaFactory({ coerce: { date: true } });
 
-export const insertPersonSchema = createCoercedInsertSchema(people).pick({ name: true, relationship: true, background: true });
+export const insertPersonSchema = createCoercedInsertSchema(people).pick({ name: true, relationship: true, background: true, avatar_color: true });
 export type Person = typeof people.$inferSelect;
 export type InsertPerson = z.infer<typeof insertPersonSchema>;
 

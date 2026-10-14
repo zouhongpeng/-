@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, Pressable } from 'react-native';
 import { Screen } from '@/components/Screen';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -7,7 +7,7 @@ import { useAuth } from '@/contexts/AuthContext';
  * PIN 锁全屏 Gate
  * - 首次：设置 4 位 PIN
  * - 之后：输入 4 位 PIN 解锁
- * 居中简洁的 Apple 极简风
+ * 极简居中，温柔的数据风格
  */
 export default function PinScreen() {
   const { initialized, loaded, setup, unlock, isUnlocked } = useAuth();
@@ -44,30 +44,76 @@ export default function PinScreen() {
     }
   };
 
+  const pressDigit = (d: string) => {
+    if (busy || pin.length >= 4) return;
+    handleChange(pin + d);
+  };
+  const pressBack = () => {
+    if (busy) return;
+    handleChange(pin.slice(0, -1));
+  };
+
   return (
     <Screen>
-      <View className="flex-1 items-center justify-center px-8">
-        <Text className="text-4xl font-bold text-foreground tracking-tight">回复小助手</Text>
-        <Text className="mt-2 text-sm text-muted">安静地陪你把关系想清楚</Text>
-
-        <View className="mt-12 w-full max-w-[320px] items-center">
-          <Text className="text-sm text-muted mb-4">
-            {isSetup ? '设置 4 位 PIN 以保护隐私' : '输入 PIN 解锁'}
-          </Text>
-          <TextInput
-            ref={inputRef}
-            value={pin}
-            onChangeText={handleChange}
-            keyboardType="number-pad"
-            secureTextEntry
-            maxLength={4}
-            editable={!busy}
-            className="w-48 h-14 text-center text-3xl font-bold tracking-[1.5rem] text-foreground bg-surface border border-border rounded-2xl"
-            placeholder="••••"
-            placeholderTextColor="#D1D1D1"
-          />
-          {error ? <Text className="mt-3 text-sm text-danger">{error}</Text> : null}
+      <View className="flex-1 items-center justify-center px-8 bg-background">
+        <View className="items-center">
+          <Text className="text-4xl font-bold text-foreground tracking-tight">回复小助手</Text>
+          <Text className="mt-2 text-sm text-muted">安静地陪你把关系想清楚</Text>
         </View>
+
+        <Text className="mt-12 text-xs text-muted">{isSetup ? '设置 4 位 PIN 以保护隐私' : '输入 4 位 PIN'}</Text>
+
+        {/* 圆点指示器 */}
+        <View className="my-6 flex-row gap-4">
+          {[0, 1, 2, 3].map((i) => (
+            <View
+              key={i}
+              className={`w-3.5 h-3.5 rounded-full ${i < pin.length ? 'bg-accent' : 'bg-border'}`}
+            />
+          ))}
+        </View>
+
+        {error ? <Text className="mb-2 text-sm text-danger">{error}</Text> : null}
+
+        {/* 数字键盘 */}
+        <View className="w-full max-w-[280px] flex-row flex-wrap justify-center">
+          {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((d) => (
+            <Pressable
+              key={d}
+              onPress={() => pressDigit(d)}
+              disabled={busy}
+              className="w-[88px] h-[62px] items-center justify-center active:opacity-50"
+            >
+              <Text className="text-2xl font-medium text-foreground">{d}</Text>
+            </Pressable>
+          ))}
+          <View className="w-[88px] h-[62px]" />
+          <Pressable
+            onPress={() => pressDigit('0')}
+            disabled={busy}
+            className="w-[88px] h-[62px] items-center justify-center active:opacity-50"
+          >
+            <Text className="text-2xl font-medium text-foreground">0</Text>
+          </Pressable>
+          <Pressable
+            onPress={pressBack}
+            disabled={busy}
+            className="w-[88px] h-[62px] items-center justify-center active:opacity-50"
+          >
+            <Text className="text-xl text-muted">⌫</Text>
+          </Pressable>
+        </View>
+
+        {/* 隐藏输入框以调用系统键盘 */}
+        <TextInput
+          ref={inputRef}
+          value={pin}
+          onChangeText={handleChange}
+          keyboardType="number-pad"
+          maxLength={4}
+          editable={!busy}
+          className="absolute w-1 h-1 opacity-0"
+        />
 
         <View className="absolute bottom-10 items-center">
           <Text className="text-[11px] text-muted">聊天记录涉及他人隐私，请勿分享本应用数据</Text>

@@ -24,49 +24,50 @@
 @layer theme {
   :root {
     @variant light {
-      /* Base Colors */
-      --background: #fafafa;
-      --foreground: var(--eclipse);
+      /* Base Colors — 温柔的数据：低饱和暖色系（米白底） */
+      --background: #faf9f7;
+      --foreground: #3f3a36;
 
       /* Surface: Used for non-overlay components (cards, accordions, disclosure groups) */
-      --surface: var(--white);
+      --surface: #fffdfb;
       --surface-foreground: var(--foreground);
 
       /* Overlay: Used for floating/overlay components (dialogs, popovers, modals, menus) */
-      --overlay: var(--white);
+      --overlay: #ffffff;
       --overlay-foreground: var(--foreground);
 
-      --muted: oklch(0.5517 0.0138 285.94);
+      --muted: #98918a;
 
-      --default: oklch(94% 0.001 286.375);
-      --default-foreground: var(--eclipse);
+      --default: #f4efe9;
+      --default-foreground: #3f3a36;
 
-      --accent: oklch(0.6204 0.195 253.83);
-      --accent-foreground: var(--snow);
+      /* 珊瑚橙强调色 */
+      --accent: #ff7a5c;
+      --accent-foreground: #fffdfb;
 
       /* Form Fields */
-      --field-background: var(--white);
-      --field-foreground: oklch(0.2103 0.0059 285.89);
+      --field-background: #fffdfb;
+      --field-foreground: #3f3a36;
       --field-placeholder: var(--muted);
       --field-border: transparent; /* no border by default on form fields */
 
       /* Status Colors */
-      --success: oklch(0.7329 0.1935 150.81);
-      --success-foreground: var(--eclipse);
+      --success: #6fae8c;
+      --success-foreground: #fffdfb;
 
-      --warning: oklch(0.7819 0.1585 72.33);
-      --warning-foreground: var(--eclipse);
+      --warning: #e2a24c;
+      --warning-foreground: #3f3a36;
 
-      --danger: oklch(0.6532 0.2328 25.74);
-      --danger-foreground: var(--snow);
+      --danger: #d96a6a;
+      --danger-foreground: #fffdfb;
 
       /* Component Colors */
-      --segment: var(--white);
-      --segment-foreground: var(--eclipse);
+      --segment: #fffdfb;
+      --segment-foreground: #3f3a36;
 
       /* Misc Colors */
-      --border: oklch(90% 0.004 286.32);
-      --separator: oklch(74% 0.004 286.32);
+      --border: #efe9e2;
+      --separator: #ddd5cc;
       --focus: var(--accent);
       --link: var(--foreground);
 
@@ -211,6 +212,11 @@
   --color-accent-soft: color-mix(in oklab, var(--accent) 15%, transparent);
   --color-accent-soft-foreground: var(--accent);
   --color-accent-soft-hover: color-mix(in oklab, var(--accent) 20%, transparent);
+
+  /* 温柔的数据：雾蓝辅助色 */
+  --color-mist: #7a9bce;
+  --color-mist-soft: color-mix(in oklab, #7a9bce 14%, transparent);
+  --color-mist-foreground: #7a9bce;
 
   --color-danger-soft: color-mix(in oklab, var(--danger) 15%, transparent);
   --color-danger-soft-foreground: var(--danger);

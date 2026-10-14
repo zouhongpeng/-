@@ -113,6 +113,12 @@ async function getGrowthMode(): Promise<GrowthMode> {
   return (data?.[0]?.growth_mode as GrowthMode) ?? "canned";
 }
 
+/** 节制机制开关（默认关闭） */
+async function getModeration(): Promise<boolean> {
+  const { data } = await db.from("settings").select("moderation").limit(1);
+  return data?.[0]?.moderation === true;
+}
+
 // ============ 人物档案 ============
 app.get("/api/v1/people", requirePin, async (req, res) => {
   try {
@@ -157,6 +163,7 @@ app.post("/api/v1/people", requirePin, async (req, res) => {
       name: z.string().min(1),
       relationship: z.string().optional().default(""),
       background: z.string().optional().default(""),
+      avatar_color: z.string().optional().default(""),
       dates: z.array(z.object({ name: z.string(), month_day: z.string() })).optional().default([]),
     });
     const body = schema.parse(req.body);
@@ -164,6 +171,7 @@ app.post("/api/v1/people", requirePin, async (req, res) => {
       name: body.name,
       relationship: body.relationship,
       background: body.background,
+      avatar_color: body.avatar_color || "",
       updated_at: dayjs().toISOString(),
     }).select("id").single();
     if (error) throw error;
@@ -182,6 +190,7 @@ app.put("/api/v1/people/:id", requirePin, async (req, res) => {
       name: z.string().min(1).optional(),
       relationship: z.string().optional(),
       background: z.string().optional(),
+      avatar_color: z.string().optional(),
       dates: z.array(z.object({ name: z.string(), month_day: z.string() })).optional(),
     });
     const body = schema.parse(req.body);
@@ -189,6 +198,7 @@ app.put("/api/v1/people/:id", requirePin, async (req, res) => {
     if (body.name !== undefined) patch.name = body.name;
     if (body.relationship !== undefined) patch.relationship = body.relationship;
     if (body.background !== undefined) patch.background = body.background;
+    if (body.avatar_color !== undefined) patch.avatar_color = body.avatar_color;
     const { error } = await db.from("people").update(patch).eq("id", id);
     if (error) throw error;
     if (body.dates) {
@@ -248,8 +258,8 @@ app.post("/api/v1/analyze", requirePin, async (req, res) => {
     if (re) throw re;
     const recent24 = (recentAll ?? []).filter((r: any) => r.status !== "failed");
 
-    // 节制：第 3 次分析劝停
-    if (shouldModerate(recent24.length)) {
+    // 节制：第 3 次分析劝停（默认关闭，开关开启后生效）
+    if ((await getModeration()) && shouldModerate(recent24.length)) {
       return ok(res, { moderated: true, message: MODERATION_REPLY });
     }
 
@@ -501,10 +511,24 @@ app.put("/api/v1/settings/mode", requirePin, async (req, res) => {
   }
 });
 
+// 节制机制开关设置
+app.put("/api/v1/settings/moderation", requirePin, async (req, res) => {
+  try {
+    const schema = z.object({ enabled: z.boolean() });
+    const { enabled } = schema.parse(req.body);
+    const { error } = await db.from("settings").update({ moderation: enabled }).eq("id", 1);
+    if (error) throw error;
+    ok(res, { moderation: enabled });
+  } catch (e: any) {
+    fail(res, e?.message || "设置失败", 400);
+  }
+});
+
 app.get("/api/v1/settings", requirePin, async (req, res) => {
   try {
     const mode = await getGrowthMode();
-    ok(res, { growth_mode: mode });
+    const moderation = await getModeration();
+    ok(res, { growth_mode: mode, moderation });
   } catch (e: any) {
     fail(res, e?.message || "查询失败", 500, 500);
   }

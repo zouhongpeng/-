@@ -13,7 +13,8 @@ import dayjs from 'dayjs';
 type Person = any;
 type DateItem = { name: string; month_day: string };
 
-const EMPTY_FORM = { name: '', relationship: '', background: '', dates: [] as DateItem[] };
+const EMPTY_FORM = { name: '', relationship: '', background: '', avatar_color: '#FF7A5C', dates: [] as DateItem[] };
+const AVATAR_COLORS_HOME = ['#FF7A5C', '#7A9BCE', '#C9A227', '#6FB98F', '#C084FC', '#E4572E', '#5AA9E6'];
 
 /**
  * 人物列表页（首页 Tab）
@@ -72,6 +73,7 @@ export default function HomeScreen() {
       name: p.name,
       relationship: p.relationship || '',
       background: p.background || '',
+      avatar_color: p.avatar_color || '#FF7A5C',
       dates: (p.dates || []).map((d: any) => ({ name: d.name, month_day: d.month_day })),
     });
     setShowModal(true);
@@ -92,9 +94,13 @@ export default function HomeScreen() {
         name: form.name.trim(),
         relationship: form.relationship.trim(),
         background: form.background.trim(),
+        avatar_color: form.avatar_color,
         dates: form.dates.filter((d) => d.name.trim() && /^\d{1,2}-\d{1,2}$/.test(d.month_day)),
       };
-      if (editing) await api.updatePerson(editing.id, payload);
+      if (editing) {
+        const patch: any = { name: payload.name, relationship: payload.relationship, background: payload.background, avatar_color: payload.avatar_color };
+        await api.updatePerson(editing.id, { ...patch, dates: payload.dates });
+      }
       else await api.createPerson(payload);
       setShowModal(false);
       load();
@@ -164,12 +170,17 @@ export default function HomeScreen() {
             className="bg-white rounded-2xl px-5 py-4 mb-3 border border-[#F0F0F0]"
           >
             <View className="flex-row items-center justify-between">
-              <View className="flex-1">
-                <Text className="text-xl font-semibold text-foreground">{item.name}</Text>
-                <Text className="mt-0.5 text-[13px] text-muted">
-                  {item.relationship || '未填写关系'}
-                </Text>
-                <Text className="mt-2 text-[11px] text-muted">{formatInteraction(item.last_interaction_at)}</Text>
+              <View className="flex-1 flex-row items-center">
+                <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: item.avatar_color || '#FF7A5C', alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
+                  <Text className="text-lg font-bold text-white">{item.name?.charAt(0)}</Text>
+                </View>
+                <View className="flex-1">
+                  <Text className="text-xl font-semibold text-foreground">{item.name}</Text>
+                  <Text className="mt-0.5 text-[13px] text-muted">
+                    {item.relationship || '未填写关系'}
+                  </Text>
+                  <Text className="mt-2 text-[11px] text-muted">{formatInteraction(item.last_interaction_at)}</Text>
+                </View>
               </View>
               <View className="flex-row items-center space-x-1">
                 <TouchableOpacity onPress={() => openEdit(item)} hitSlop={8} className="w-9 h-9 items-center justify-center">
@@ -212,6 +223,14 @@ export default function HomeScreen() {
                 placeholderTextColor="#C9C9C9"
                 className="bg-[#F6F6F6] rounded-xl px-4 h-12 text-base text-foreground mb-4"
               />
+              <Text className="text-[13px] text-muted mb-1.5">头像颜色圆点</Text>
+              <View className="flex-row flex-wrap mb-4">
+                {AVATAR_COLORS_HOME.map((c) => (
+                  <TouchableOpacity key={c} onPress={() => setForm({ ...form, avatar_color: c })} style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: c, marginRight: 10, alignItems: 'center', justifyContent: 'center' }}>
+                    {form.avatar_color === c && <View style={{ width: 13, height: 13, borderRadius: 7, backgroundColor: '#FFFFFF' }} />}
+                  </TouchableOpacity>
+                ))}
+              </View>
               <Text className="text-[13px] text-muted mb-1.5">背景备注（性格 / 聊天风格 / 当前阶段）</Text>
               <TextInput
                 value={form.background}

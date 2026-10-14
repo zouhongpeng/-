@@ -87,13 +87,18 @@ export const api = {
     request<{ id: string; content: any }>("POST", "/api/v1/reports/generate"),
 
   // ===== Settings =====
-  settings: () => request<{ growth_mode: string }>("GET", "/api/v1/settings"),
+  settings: () => request<{ growth_mode: string; moderation: boolean }>("GET", "/api/v1/settings"),
   setMode: (mode: string) =>
     request<{ growth_mode: string }>("PUT", "/api/v1/settings/mode", { mode }),
-  updateSettings: async (data: { growth_mode?: string; pin?: string }) => {
-    // 后端分开两个接口：growth_mode 走 /settings/mode，pin 变更走 pin/setup（已解锁态下允许改）
+  setModeration: (on: boolean) =>
+    request<{ moderation: boolean }>("PUT", "/api/v1/settings/moderation", { enabled: on }),
+  updateSettings: async (data: { growth_mode?: string; pin?: string; moderation?: boolean }) => {
+    // 后端分开多个接口：growth_mode 走 /settings/mode，pin 变更走 pin/setup，moderation 走 /settings/moderation
     if (data.growth_mode !== undefined) {
       return request("PUT", "/api/v1/settings/mode", { mode: data.growth_mode });
+    }
+    if (data.moderation !== undefined) {
+      return request("PUT", "/api/v1/settings/moderation", { enabled: data.moderation });
     }
     if (data.pin !== undefined) {
       return request("POST", "/api/v1/pin/setup", { pin: data.pin });

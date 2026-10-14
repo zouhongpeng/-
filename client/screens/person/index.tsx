@@ -4,6 +4,10 @@ import { useSafeRouter, useSafeSearchParams } from '@/hooks/useSafeRouter';
 import { Screen } from '@/components/Screen';
 import { api } from '@/utils/api';
 import dayjs from 'dayjs';
+import Svg, { Path, Defs, LinearGradient as SvgLinearGradient, Stop, Circle, Line, G } from 'react-native-svg';
+import { LinearGradient } from 'expo-linear-gradient';
+
+const AVATAR_COLORS = ['#FF7A5C', '#7A9BCE', '#C9A227', '#6FB98F', '#C084FC', '#E4572E', '#5AA9E6'];
 
 interface PersonDetailProps {
   id: string;
@@ -12,8 +16,17 @@ interface PersonDetailProps {
 const TEMP_COLOR: Record<string, string> = {
   热: '#E4572E',
   温: '#C9A227',
-  冷: '#5B7C99',
+  冷: '#7A9BCE',
 };
+
+const TEMP_POS: Record<string, number> = { 热: 0, 温: 0.5, 冷: 1 };
+
+// 从档案存储的颜色值（可为空 / 旧数据无颜色）解析头图圆点色
+function avatarColor(color?: string): string {
+  if (color && (AVATAR_COLORS as string[]).includes(color)) return color;
+  // 按称呼哈希稳定取色
+  return AVATAR_COLORS[0];
+}
 
 /**
  * 人物详情页：档案 + 温度趋势图 + 重要日期 + 时间线
@@ -53,6 +66,9 @@ export default function PersonDetailScreen() {
 
   if (!id) return null;
 
+  const latestTemp = temps.length ? temps[temps.length - 1].label : '';
+  const latestTempColor = TEMP_COLOR[latestTemp] || '#C9A227';
+
   return (
     <Screen safeAreaEdges={['top', 'left', 'right', 'bottom']}>
       <View className="px-4 pt-2 pb-1">
@@ -65,19 +81,62 @@ export default function PersonDetailScreen() {
         <View className="flex-1 items-center pt-20"><ActivityIndicator color="#666" /></View>
       ) : person ? (
         <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 60 }}>
-          {/* 档案头部 */}
-          <View className="flex-row items-center justify-between">
-            <View className="flex-1">
-              <Text className="text-3xl font-bold text-foreground tracking-tight">{person.name}</Text>
-              <Text className="mt-1 text-[14px] text-muted">{person.relationship || '未填写关系'}</Text>
+          {/* 档案头部：渐变卡片 + 称呼大字 + 关系标签 + 温度环 */}
+          <LinearGradient
+            colors={['#FFF1EC', '#FDE8E4', '#ECEEF8']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            className="rounded-[26px] p-5"
+            style={{ shadowColor: '#E4572E', shadowOpacity: 0.12, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 3 }}
+          >
+            <View className="flex-row items-center">
+              {/* 自定义彩色圆点头像 */}
+              <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: avatarColor(person.avatar_color), alignItems: 'center', justifyContent: 'center' }}>
+                <Text className="text-2xl font-bold" style={{ color: '#FFFFFF' }}>{person.name?.charAt(0)}</Text>
+              </View>
+
+              <View className="flex-1 ml-4">
+                <Text className="text-[26px] font-bold text-foreground tracking-tight">{person.name}</Text>
+                <View className="mt-1.5 flex-row items-center gap-2">
+                  <View className="px-2.5 py-1 rounded-full" style={{ backgroundColor: 'rgba(255,255,255,0.72)' }}>
+                    <Text className="text-[12px] font-medium text-foreground">{person.relationship || '关系未定义'}</Text>
+                  </View>
+                  {!!person.growth && (
+                    <Text className="text-[11px] text-muted">{person.growth}</Text>
+                  )}
+                </View>
+              </View>
+
+              {/* 温度圆环 */}
+              {temps.length > 0 && (
+                <View className="items-center">
+                  <Svg width={64} height={64} viewBox="0 0 64 64">
+                    <Circle cx={32} cy={32} r={26} stroke="#EDE7DF" strokeWidth={6} fill="none" />
+                    <Circle
+                      cx={32} cy={32} r={26}
+                      stroke={latestTempColor} strokeWidth={6} fill="none"
+                      strokeDasharray={`${Math.max(2, (TEMP_POS[latestTemp] ?? 0.5) * 163)} 999`}
+                      strokeLinecap="round"
+                      transform="rotate(-90 32 32)"
+                    />
+                  </Svg>
+                  <View className="absolute items-center">
+                    <Text className="text-[22px] font-bold" style={{ color: latestTempColor }}>{latestTemp || '–'}</Text>
+                    <Text className="text-[9px] text-muted">当前温度</Text>
+                  </View>
+                </View>
+              )}
             </View>
-            <TouchableOpacity onPress={() => setEditModal(true)} className="px-4 h-9 bg-[#F1F1F1] rounded-full items-center justify-center">
-              <Text className="text-[13px] text-foreground">编辑档案</Text>
+
+            {!!person.background && (
+              <Text className="mt-4 text-[13px] text-muted leading-5">{person.background}</Text>
+            )}
+
+            <TouchableOpacity onPress={() => setEditModal(true)} className="mt-4 self-start px-3.5 h-8 rounded-full items-center justify-center flex-row gap-1.5" style={{ backgroundColor: 'rgba(255,255,255,0.66)' }}>
+              <Text className="text-[12px] text-foreground">编辑档案</Text>
+              <Text className="text-[12px] text-accent">›</Text>
             </TouchableOpacity>
-          </View>
-          {!!person.background && (
-            <Text className="mt-3 text-[14px] text-muted leading-5">{person.background}</Text>
-          )}
+          </LinearGradient>
 
           {/* 分析入口 */}
           <TouchableOpacity
@@ -155,42 +214,133 @@ function fmtDate(month_day: string) {
   return `${+m}月${+d}日`;
 }
 
-/** 温度趋势折线图（用 View 简化绘制） */
+/** 温度趋势：健康App式柔和渐变面积图（贝塞尔曲线） */
 function TempChart({ data }: { data: { label: string; reason: string; created_at: string }[] }) {
-  // 高度归一化：热=0.86 温=0.5 冷=0.14
-  const yOf = (l: string) => (l === '热' ? 0.86 : l === '冷' ? 0.14 : 0.5);
-  const w = 320, h = 120;
+  const w = 340, h = 130;
+  const padTop = 14, padBottom = 16;
+  const chartH = h - padTop - padBottom;
   const n = data.length;
-  const pts = data.map((d, i) => ({
+  const lineColor = n >= 2 && TEMP_POS[data[n - 1].label] >= TEMP_POS[data[0].label] ? '#E4572E' : '#7A9BCE';
+
+  // 生成归一化点
+  const raw = data.map((d, i) => ({
     x: n === 1 ? w / 2 : (i / (n - 1)) * w,
-    y: yOf(d.label) * h,
+    y: padTop + TEMP_POS[d.label] * chartH,
     label: d.label,
   }));
-  const isDown = n >= 2 && yOf(data[n - 1].label) < yOf(data[0].label);
-  return (
-    <View className="bg-white rounded-2xl px-4 py-4 border border-[#F0F0F0]">
-      {/* 三条参考线 */}
-      <View style={{ height: h, marginVertical: 8 }}>
-        {['热', '温', '冷'].map((l) => (
-          <View key={l} style={{ position: 'absolute', left: 0, right: 0, top: yOf(l) * h }}>
-            <View className="flex-row items-center">
-              <Text className="text-[10px] text-muted mr-2" style={{ width: 14 }}>{l}</Text>
-              <View className="flex-1 h-px bg-[#EFEFEF]" />
-            </View>
-          </View>
-        ))}
-        {pts.map((p, i) => (
-          <View key={i} style={{ position: 'absolute', left: p.x - 5, top: p.y - 5 }}>
-            <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: TEMP_COLOR[p.label] }} />
-          </View>
-        ))}
+
+  // 单点：画一个小圆点 + 渐变点缀
+  if (n === 1) {
+    const p = raw[0];
+    const color = TEMP_COLOR[p.label] || '#C9A227';
+    return (
+      <View className="rounded-3xl border border-border p-4" style={{ backgroundColor: 'rgba(255,253,251,0.92)' }}>
+        <Svg width={w} height={h} viewBox={`0 0 ${w} ${h}`}>
+          <Defs>
+            <SvgLinearGradient id="ctGrad" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor={color} stopOpacity="0.55" />
+              <Stop offset="1" stopColor={color} stopOpacity="0.05" />
+            </SvgLinearGradient>
+          </Defs>
+          {['热', '温', '冷'].map((l) => (
+            <Line key={l} x1={0} y1={padTop + TEMP_POS[l] * chartH} x2={w} y2={padTop + TEMP_POS[l] * chartH} stroke="#EFE9E2" strokeWidth={1} strokeDasharray="4 6" />
+          ))}
+          <Circle cx={p.x} cy={p.y} r={13} fill={color} opacity={0.2} />
+          <Circle cx={p.x} cy={p.y} r={6} fill={color} />
+        </Svg>
+        <View className="mt-1 flex-row items-center justify-between">
+          <Text className="text-[12px] font-bold" style={{ color }}>{p.label}</Text>
+          <Text className="text-[11px] text-muted">最近一次{data[0].label}，{dayjs(data[0].created_at).format('M月D日')}</Text>
+        </View>
       </View>
-      {isDown && <Text className="text-[11px] text-danger mt-1">关系略有降温趋势，值得留意</Text>}
+    );
+  }
+
+  // 贝塞尔平滑曲线（Catmull-Rom → 三次 Bezier）
+  let d = `M ${raw[0].x} ${raw[0].y}`;
+  for (let i = 0; i < raw.length - 1; i++) {
+    const cur = raw[i];
+    const next = raw[i + 1];
+    const prev = raw[i - 1] || cur;
+    const c1 = { x: cur.x + (next.x - prev.x) / 6, y: cur.y + (next.y - prev.y) / 6 };
+    const n2 = raw[i + 2] || next;
+    const c2 = { x: next.x - (n2.x - cur.x) / 6, y: next.y - (n2.y - cur.y) / 6 };
+    d += ` C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${next.x} ${next.y}`;
+  }
+  const area = `${d} L ${raw[raw.length - 1].x} ${h - padBottom} L ${raw[0].x} ${h - padBottom} Z`;
+
+  const isDown = n >= 2 && TEMP_POS[data[n - 1].label] > TEMP_POS[data[0].label];
+
+  return (
+    <View className="rounded-3xl border border-border p-4" style={{ backgroundColor: 'rgba(255,253,251,0.92)' }}>
+      <Text className="text-[13px] font-semibold text-foreground mb-1">关系温度</Text>
+      <Svg width={w} height={h} viewBox={`0 0 ${w} ${h}`}>
+        <Defs>
+          <SvgLinearGradient id="ctGrad" x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor={lineColor} stopOpacity="0.42" />
+            <Stop offset="1" stopColor={lineColor} stopOpacity="0.02" />
+          </SvgLinearGradient>
+        </Defs>
+        {/* 参考线（低饱和虚线） */}
+        {['热', '温', '冷'].map((l) => (
+          <Line key={l} x1={0} y1={padTop + TEMP_POS[l] * chartH} x2={w} y2={padTop + TEMP_POS[l] * chartH} stroke="#EFE9E2" strokeWidth={1} strokeDasharray="4 6" />
+        ))}
+        {/* 渐变面积 */}
+        <Path d={area} fill="url(#ctGrad)" />
+        {/* 平滑曲线 */}
+        <Path d={d} fill="none" stroke={lineColor} strokeWidth={2.5} strokeLinecap="round" />
+        {/* 数据点 */}
+        {raw.map((p, i) => (
+          <G key={i}>
+            <Circle cx={p.x} cy={p.y} r={7} fill={TEMP_COLOR[p.label] || '#C9A227'} opacity={0.22} />
+            <Circle cx={p.x} cy={p.y} r={3.5} fill={TEMP_COLOR[p.label] || '#C9A227'} />
+          </G>
+        ))}
+      </Svg>
+      <View className="mt-1.5 flex-row items-center justify-between">
+        <Text className="text-[11px] text-muted">最近一次 · {data[data.length - 1].label}</Text>
+        {isDown ? (
+          <Text className="text-[11px]" style={{ color: lineColor }}>关系略降温，值得留意</Text>
+        ) : (
+          <Text className="text-[11px]" style={{ color: lineColor }}>关系在升温 · 很好</Text>
+        )}
+      </View>
     </View>
   );
 }
 
 /** 时间线卡片 */
+/** iMessage 质感聊天气泡 */
+function ChatBubbles({ text }: { text: string }) {
+  const lines = (text || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const msgs: { me: boolean; content: string }[] = [];
+  for (const line of lines) {
+    const m = line.match(/^(我|对方|ta|Ta|TA)[:：](.*)$/);
+    if (m) {
+      msgs.push({ me: m[1] === '我', content: m[2] });
+    } else {
+      // 无法识别说话者的原始行：并入上一条，或作为对方消息兜底
+      if (msgs.length) msgs[msgs.length - 1].content += '\n' + line;
+      else msgs.push({ me: false, content: line });
+    }
+  }
+  if (!msgs.length) return null;
+  return (
+    <View>
+      {msgs.map((msg, i) => (
+        <View key={i} className={`flex-row mb-2 ${msg.me ? 'justify-end' : 'justify-start'}`}>
+          <View
+            className={`px-3.5 py-2 max-w-[82%] ${msg.me ? 'rounded-[18px] rounded-br-[6px]' : 'rounded-[18px] rounded-bl-[6px]'}`}
+            style={{ backgroundColor: msg.me ? '#F0E6DE' : '#FFFFFF', borderWidth: 1, borderColor: '#EFE9E2' }}
+          >
+            <Text className={`text-[13px] leading-5 ${msg.me ? 'text-foreground' : 'text-foreground'}`}>{msg.content}</Text>
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
 function TimelineCard({ record, personaName, expanded, onToggle, onDelete }: any) {
   const status = record.status;
   const res = record.result || {};
@@ -220,8 +370,10 @@ function TimelineCard({ record, personaName, expanded, onToggle, onDelete }: any
             <View className="space-y-3">
               {!!record.chat_input && (
                 <View>
-                  <Text className="text-[12px] text-muted mb-1">聊天记录</Text>
-                  <Text className="text-[13px] text-foreground leading-5">{record.chat_input}</Text>
+                  <Text className="text-[12px] text-muted mb-1.5">聊天记录</Text>
+                  <View className="bg-on-surface rounded-2xl px-3 py-3">
+                    <ChatBubbles text={record.chat_input} />
+                  </View>
                 </View>
               )}
               {!!record.thought_input && (
@@ -285,6 +437,7 @@ function EditPersonModal({ person, onClose, onSaved, onDeleted }: any) {
     name: person.name,
     relationship: person.relationship || '',
     background: person.background || '',
+    avatar_color: person.avatar_color || AVATAR_COLORS[0],
     dates: (person.dates || []).map((d: any) => ({ name: d.name, month_day: d.month_day })),
   });
   const [saving, setSaving] = useState(false);
@@ -296,6 +449,7 @@ function EditPersonModal({ person, onClose, onSaved, onDeleted }: any) {
         name: form.name.trim(),
         relationship: form.relationship.trim(),
         background: form.background.trim(),
+        avatar_color: form.avatar_color,
         dates: form.dates.filter((d: any) => d.name.trim() && /^\d{1,2}-\d{1,2}$/.test(d.month_day)),
       });
       onSaved();
@@ -320,6 +474,15 @@ function EditPersonModal({ person, onClose, onSaved, onDeleted }: any) {
           <ScrollView keyboardShouldPersistTaps="handled">
             <Field label="称呼"><TextInput value={form.name} onChangeText={(t) => setForm({ ...form, name: t })} placeholder="称呼" placeholderTextColor="#C9C9C9" className="bg-[#F6F6F6] rounded-xl px-4 h-12 text-base text-foreground" /></Field>
             <Field label="关系"><TextInput value={form.relationship} onChangeText={(t) => setForm({ ...form, relationship: t })} placeholder="关系" placeholderTextColor="#C9C9C9" className="bg-[#F6F6F6] rounded-xl px-4 h-12 text-base text-foreground" /></Field>
+            <Field label="头像颜色圆点">
+              <View className="flex-row flex-wrap gap-3">
+                {AVATAR_COLORS.map((c) => (
+                  <TouchableOpacity key={c} onPress={() => setForm({ ...form, avatar_color: c })} style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: c, alignItems: 'center', justifyContent: 'center' }}>
+                    {form.avatar_color === c && <View style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: '#FFFFFF' }} />}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </Field>
             <Field label="背景备注"><TextInput value={form.background} onChangeText={(t) => setForm({ ...form, background: t })} placeholder="性格/聊天风格/当前阶段" placeholderTextColor="#C9C9C9" multiline className="bg-[#F6F6F6] rounded-xl px-4 py-3 text-base text-foreground min-h-[80px]" /></Field>
             <Text className="text-[13px] text-muted mb-1.5">重要日期</Text>
             {(form.dates || []).map((d: any, i: number) => (
