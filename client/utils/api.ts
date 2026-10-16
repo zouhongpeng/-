@@ -64,6 +64,8 @@ export const api = {
   markSuggestion: (id: string, index: number, used: boolean) =>
     request<any>("PUT", `/api/v1/analysis/${id}/mark`, { index, used }),
   deleteAnalysis: (id: string) => request<any>("DELETE", `/api/v1/analysis/${id}`),
+  // 直连 DeepSeek 成功后，保存计算结果到后端（时间线/温度），可持久化即存
+  saveComputed: (data: any) => request<any>("POST", "/api/v1/analyze/save-computed", data),
 
   // ===== Timeline / Temperature =====
   personAnalyses: (personId: string) =>

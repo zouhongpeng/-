@@ -10,6 +10,7 @@ import { Screen } from '@/components/Screen';
 import { api } from '@/utils/api';
 import { createFormDataFile } from '@/utils';
 import { findMethodByTitle } from '@/constants/methodologies';
+import { getDsKey, analyzeDirect, saveComputedBestEffort } from '@/utils/deepseek';
 
 interface AnalyzeProps {
   person_id: string;
@@ -59,10 +60,45 @@ export default function AnalyzeScreen() {
     if (!chat.trim() && !shotMessages.length) { Alert.alert('提示', '请先粘贴聊天记录，或用截图输入'); return; }
     if (!thought.trim()) { Alert.alert('提示', '请填写「我的想法」——没有你的视角，分析会不全'); return; }
     setLoading(true); setResult(null); setModerated(false); setMarks({});
+    const growth = await api.settings().catch(() => ({ growth_mode: 'canned' }));
+    const gmode = growth?.growth_mode === 'hint' || growth?.growth_mode === 'critique' ? growth.growth_mode : 'canned';
+
+    // 「自带钥匙」模式：本机已有 DeepSeek Key → 直连 api.deepseek.com（原生端无跨域限制，不依赖后端）
+    const dsKey = await getDsKey();
+    if (dsKey) {
+      const dr = await analyzeDirect({
+        apiKey: dsKey,
+        personName,
+        chatRecord: chat,
+        myThought: thought,
+        myReply: gmode === 'critique' ? thought : undefined,
+        growthMode: gmode,
+      });
+      if (!dr.ok) {
+        setLoading(false);
+        if (dr.kind === 'auth') {
+          Alert.alert('API Key 无效', '你填写的 DeepSeek API Key 无法使用，请到「设置」页检查/更换。');
+        } else {
+          Alert.alert('分析失败', dr.message || '请稍后再试');
+        }
+        return;
+      }
+      setResult(dr.json);
+      // 尽力持久化到时间线/温度（后端可达即保存，不可达则仅本次显示）
+      const rid = await saveComputedBestEffort({
+        person_id: personId,
+        chat_input: chat,
+        thought_input: thought,
+        result: dr.json,
+      });
+      setRecordId(rid);
+      setLoading(false);
+      return;
+    }
+
     try {
       const payload: any = { person_id: personId, chat_input: chat, thought_input: thought };
-      const growth = await api.settings().catch(() => ({ growth_mode: 'canned' }));
-      if (growth?.growth_mode === 'critique') payload.my_reply = thought;
+      if (gmode === 'critique') payload.my_reply = thought;
       const res = await api.analyze(payload);
       if (res.moderated) {
         setModerated(true);
@@ -92,7 +128,16 @@ export default function AnalyzeScreen() {
       setPollTimer(timer);
     } catch (e: any) {
       setLoading(false);
-      Alert.alert('分析失败', e?.message);
+      const msg = e?.message || '';
+      const isNet = /网络|Network|connect|Failed to fetch|fetch/i.test(msg);
+      if (isNet) {
+        // 后端不可达且未配 Key → 引导去设置填写 DeepSeek Key（App 内直连）
+        Alert.alert('需要配置 AI 接入', '当前连不上内置分析服务。请到底部「设置」→「DeepSeek API Key」填写你的密钥，即可在 App 内直接分析（密钥只存本机）。', [
+          { text: '知道了' },
+        ]);
+      } else {
+        Alert.alert('分析失败', msg || '请稍后再试');
+      }
     }
   };
 

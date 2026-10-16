@@ -351,6 +351,40 @@ app.post("/api/v1/analyze", requirePin, async (req, res) => {
   }
 });
 
+// App 端「自带钥匙」直连 DeepSeek 成功后，保存已算好的结果（时间线/温度）以便持久化
+app.post("/api/v1/analyze/save-computed", requirePin, async (req, res) => {
+  try {
+    const body = req.body || {};
+    if (!body.person_id) return fail(res, "缺少 person_id", 400);
+    const personId = body.person_id;
+    const result = body.result || {};
+    const label = ["热", "温", "冷"].includes(result?.temperature?.label) ? result.temperature.label : "温";
+    const reason = result?.temperature?.reason || "";
+    const { data: inserted } = await db
+      .from("analysis_records")
+      .insert({
+        person_id: personId,
+        chat_input: body.chat_input || "",
+        thought_input: body.thought_input || "",
+        result: result as any,
+        temp_label: label,
+        temp_reason: reason,
+        status: "done",
+      })
+      .select("id")
+      .single();
+    const recordId = inserted?.id as string;
+    await db.from("temperature_points").insert({
+      person_id: personId,
+      label,
+      reason,
+    });
+    ok(res, { record_id: recordId });
+  } catch (e: any) {
+    fail(res, e?.message || "保存失败", 400);
+  }
+});
+
 // 轮询某条记录
 app.get("/api/v1/analysis/:id", requirePin, async (req, res) => {
   try {

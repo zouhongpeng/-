@@ -8,6 +8,7 @@ import { Pressable } from 'react-native';
 import { Screen } from '@/components/Screen';
 import { api } from '@/utils/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { getDsKey, setDsKey } from '@/utils/deepseek';
 
 const MODES = [
   { key: 'canned', title: '话术模式', desc: '给完整建议句子（默认）' },
@@ -28,12 +29,19 @@ export default function SettingsScreen() {
 
   const hasPin = !!(authInitialized);
 
+  // DeepSeek 「自带钥匙」状态
+  const [dsKey, setDsKeyState] = useState('');
+  const [keyInput, setKeyInput] = useState('');
+  const [keyVisible, setKeyVisible] = useState(false);
+  const [keyEditing, setKeyEditing] = useState(false);
+
   const load = useCallback(async () => {
     try {
       const s = await api.settings();
       if (s?.growth_mode) setGrowthMode(s.growth_mode);
       if (typeof s?.moderation === 'boolean') setModeration(s.moderation);
     } catch { /* ignore */ }
+    setDsKeyState(await getDsKey());
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
@@ -48,6 +56,21 @@ export default function SettingsScreen() {
     setModeration(v);
     try { await api.updateSettings({ moderation: v }); } catch (e: any) { setModeration(!v); Alert.alert('保存失败', e?.message); }
   };
+
+  const saveKey = async () => {
+    const k = keyInput.trim();
+    if (!k) { await setDsKey(''); setDsKeyState(''); setKeyInput(''); setKeyEditing(false); Alert.alert('已移除', '已改用内置分析服务'); return; }
+    if (!k.startsWith('sk-') && k.length < 20) { Alert.alert('提示', '请输入有效的 DeepSeek API Key'); return; }
+    try {
+      await setDsKey(k);
+      setDsKeyState(k);
+      setKeyInput('');
+      setKeyEditing(false);
+      Alert.alert('已保存', '密钥仅保存在本机，分析将由 App 直连 api.deepseek.com 完成（更稳定、不依赖后端网络）。');
+    } catch (e: any) { Alert.alert('保存失败', e?.message); }
+  };
+
+  const maskKey = (k: string) => (k && k.length > 6 ? `${k.slice(0, 3)}····${k.slice(-4)}` : k || '');
 
   const savePin = async () => {
     if (!/^\d{4}$/.test(pinInput)) { Alert.alert('提示', '请输入 4 位数字 PIN'); return; }
@@ -91,6 +114,64 @@ export default function SettingsScreen() {
             <View className={`w-5 h-5 rounded-full bg-white shadow ${moderation ? 'self-end' : 'self-start'}`} />
           </View>
         </TouchableOpacity>
+
+        {/* AI 接入（自带钥匙） */}
+        <Text className="text-[15px] font-semibold text-foreground mt-6 mb-2">AI 接入</Text>
+        <View className="bg-surface rounded-3xl p-4 mb-3 border border-border">
+          <Text className="text-[14px] font-semibold text-foreground">DeepSeek API Key</Text>
+          <Text className="text-[12px] text-muted mt-1 leading-5">
+            选填：填写后分析由 App 直连 api.deepseek.com 完成，摆脱对内置服务的依赖（APK 更稳定）。密钥仅保存在本机，不会上传。
+          </Text>
+
+          {dsKey && !keyEditing ? (
+            <View className="mt-3 flex-row items-center justify-between bg-on-surface rounded-xl px-4 py-3">
+              <View className="flex-1 pr-2">
+                <Text className="text-[13px] text-muted">已配置</Text>
+                <Text className="text-[13px] text-foreground mt-0.5">{maskKey(dsKey)}</Text>
+              </View>
+              <View className="flex-row gap-2">
+                <TouchableOpacity onPress={() => { setKeyInput(dsKey); setKeyEditing(true); }} className="px-4 h-9 bg-accent-soft rounded-full items-center justify-center">
+                  <Text className="text-[13px] text-accent font-medium">更新</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => { setKeyInput(''); setKeyEditing(true); }} className="px-4 h-9 bg-on-surface rounded-full items-center justify-center">
+                  <Text className="text-[13px] text-muted">清除</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            <View className="mt-3">
+              <View className="flex-row items-center bg-on-surface rounded-xl px-3">
+                <TextInput
+                  value={keyInput}
+                  onChangeText={setKeyInput}
+                  placeholder="sk-……"
+                  placeholderTextColor="#BBB"
+                  secureTextEntry={!keyVisible}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  selectionColorClassName="accent-500"
+                  className="flex-1 py-3 text-[13px] text-foreground"
+                />
+                <TouchableOpacity onPress={() => setKeyVisible(!keyVisible)} className="px-2">
+                  <Text className="text-[12px] text-muted">{keyVisible ? '隐藏' : '显示'}</Text>
+                </TouchableOpacity>
+              </View>
+              <View className="flex-row gap-2 mt-2">
+                <TouchableOpacity onPress={saveKey} className="flex-1 h-9 bg-accent rounded-full items-center justify-center">
+                  <Text className="text-white text-[13px] font-medium">{dsKey ? '保存' : '保存'}</Text>
+                </TouchableOpacity>
+                {keyEditing && (
+                  <TouchableOpacity onPress={() => { setKeyEditing(false); setKeyInput(''); if (!dsKey) { setDsKeyState(''); } }} className="px-4 h-9 bg-on-surface rounded-full items-center justify-center">
+                    <Text className="text-[13px] text-muted">取消</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+              {!dsKey && !keyEditing && (
+                <Text className="text-[11px] text-accent mt-2">首次使用建议在此填写密钥，避免内置服务连不上时无法分析。</Text>
+              )}
+            </View>
+          )}
+        </View>
 
         {/* 安全（可选锁） */}
         <Text className="text-[15px] font-semibold text-foreground mt-2 mb-2">安全</Text>
