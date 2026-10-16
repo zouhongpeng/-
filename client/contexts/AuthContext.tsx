@@ -18,6 +18,7 @@ interface AuthContextType {
   token: string | null;
   unlock: (pin: string) => Promise<void>;
   setup: (pin: string) => Promise<void>;
+  disableLock: () => Promise<void>;
   lock: () => Promise<void>;
   refetch: () => Promise<void>;
 }
@@ -29,6 +30,7 @@ const AuthContext = createContext<AuthContextType>({
   token: null,
   unlock: async () => { throw new Error("Auth not ready"); },
   setup: async () => { throw new Error("Auth not ready"); },
+  disableLock: async () => { throw new Error("Auth not ready"); },
   lock: async () => { throw new Error("Auth not ready"); },
   refetch: async () => { return; },
 });
@@ -90,6 +92,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setInitialized(true);
   };
 
+  const disableLock = async () => {
+    await api.pinDisable();
+    setPinToken(null);
+    setToken(null);
+    setInitialized(false);
+    try {
+      await AsyncStorage.removeItem(TOKEN_KEY);
+    } catch {
+      // 忽略
+    }
+  };
+
   const lock = async () => {
     setPinToken(null);
     setToken(null);
@@ -109,10 +123,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       value={{
         loaded,
         initialized,
-        isUnlocked: !!(token && getPinToken()),
+        isUnlocked: initialized === false ? true : !!(token && getPinToken()),
         token,
         unlock,
         setup,
+        disableLock,
         lock,
         refetch,
       }}

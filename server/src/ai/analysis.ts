@@ -1,5 +1,11 @@
 import { chat, extractJson } from "./deepseek";
 import { anonymize } from "./anonymize";
+import {
+  buildMethodologySection,
+  SCENES,
+  SCENE_THEORY,
+  METHODOLOGY_CARDS,
+} from "./methodologies";
 
 /** 成长模式：canned (话术) / hint (提示) / critique (点评) */
 export type GrowthMode = "canned" | "hint" | "critique";
@@ -14,13 +20,14 @@ export interface AnalysisInput {
 }
 
 export interface AnalysisOutcome {
+  scene?: string; // 场景类型（五选一）；解析缺失时可空
   thoughts: { point: string; evidence: string }[];
-  suggestions: { style: string; text: string; reason: string }[];
+  suggestions: { style: string; text: string; reason: string; theory_tag?: string }[];
   notes: string[];
   temperature: { label: "热" | "温" | "冷"; reason: string };
 }
 
-/** 构建系统提示词（含全部防差错规范） */
+/** 构建系统提示词（含全部防差错规范 + 沟通方法论引擎） */
 function buildSystem(mode: GrowthMode): string {
   const modeRule =
     mode === "hint"
@@ -28,6 +35,25 @@ function buildSystem(mode: GrowthMode): string {
       : mode === "critique"
         ? "成长模式=点评：用户会自己在『我的想法』里写好回复，你只需点评他/她的回复（指出优点、可改进处、风险），不要代写完整新句子；如回复明显不妥可给替代思路。"
         : "成长模式=话术：给出可直接发送的完整建议句子（语气可润色，内容必须真实）。";
+
+  const sceneRule = `【沟通方法论引擎】
+以下是内置方法论卡片库（全文）：
+${buildMethodologySection()}
+
+分析前先判断这段聊天的场景类型（五选一，必须从下面选）：${SCENES.join(" / ")}。
+场景判断规则：
+- 冲突表达（表达不满、回应指责、提出请求、化解冲突）→ 重点依据卡1+卡2
+- 敏感话题（怕谈崩、情绪上来了、要谈重要的/敏感的）→ 重点依据卡2
+- 焦虑内耗（等回复焦虑、过度在意评价、自我怀疑）→ 重点依据卡3
+- 付出错位（付出没被领情、对方感觉不到心意）→ 重点依据卡4+卡1
+- 日常交流（无上述特征的普通闲聊）→ 正常分析，不强制引用方法论
+
+【方法论引用规范】
+1. 只能引用上方内置卡片里的内容，禁止编造书中不存在的理论。
+2. 每条建议回复末尾追加"依据：XX方法"标签（XX为卡片名，如"非暴力沟通""关键对话""课题分离""表达频道"），并使用 suggestion 的 theory_tag 字段给出对应卡片名。
+3. "注意事项"板块可引用卡片的使用要点与禁用提醒，帮助用户避开风险。
+4. 两卡片原则冲突时，优先"先恢复安全感、再谈内容（关键对话原则）"。
+5. 日常交流场景不强制给建议标注理论依据。`;
 
   return `你是一名极简、诚实、克制的人际沟通教练。你帮助用户理解一段聊天、维护关系、提升沟通能力。
 你最重要的品质是：真实、有依据、不武断、节制——你不是替用户说话，而是帮用户自己想清楚。
@@ -42,15 +68,20 @@ function buildSystem(mode: GrowthMode): string {
 
 【输出格式】严格输出 JSON，不要任何多余文字：
 {
+  "scene": "冲突表达/敏感话题/焦虑内耗/付出错位/日常交流",
   "thoughts": [{"point": "要点", "evidence": "依据：引用原句或‘信息有限，仅为可能’"}],
-  "suggestions": [{"style": "真诚直接/幽默轻松/放缓节奏", "text": "具体建议", "reason": "一句话理由"}],
-  "notes": ["注意事项（0-2条节奏提醒）"],
+  "suggestions": [{"style": "真诚直接/幽默轻松/放缓节奏", "text": "具体建议（末尾附‘依据：XX方法’）", "reason": "一句话理由", "theory_tag": "非暴力沟通/关键对话/课题分离/表达频道 或留空"}],
+  "notes": ["注意事项（0-2条节奏提醒，可含卡片使用要点/禁用提醒）"],
   "temperature": {"label": "热/温/冷", "reason": "一句依据"}
 }
+- scene：五选一，判断结果标签。
 - thoughts：2-4 条
 - suggestions：2-3 个，每个带风格标签、具体建议、一句话理由（根据成长模式调整 text 的形态）
 - notes：0-2 条
 - temperature.label 只允许"热""温""冷"三种，给出作出判断的一句依据
+- scene / suggestions[].theory_tag 解析失败或缺省时可留空，不影响分析主流程
+
+${sceneRule}
 
 ${modeRule}`;
 }
@@ -81,6 +112,7 @@ export async function runAnalysis(input: AnalysisInput): Promise<AnalysisOutcome
     throw new Error("AI 返回无法解析");
   }
   return {
+    scene: parsed.scene && (SCENES as readonly string[]).includes(String(parsed.scene)) ? String(parsed.scene) : undefined,
     thoughts: parsed.thoughts ?? [],
     suggestions: parsed.suggestions ?? [],
     notes: parsed.notes ?? [],

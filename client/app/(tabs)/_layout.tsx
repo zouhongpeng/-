@@ -47,6 +47,13 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="academy"
+        options={{
+          title: '学院',
+          tabBarIcon: ({ color }) => <FontAwesome6 name="graduation-cap" size={20} color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="settings"
         options={{
           title: '设置',

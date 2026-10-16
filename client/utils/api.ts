@@ -43,6 +43,8 @@ export const api = {
     request<{ token: string; growth_mode: string }>("POST", "/api/v1/pin/setup", { pin }),
   pinUnlock: (pin: string) =>
     request<{ token: string; growth_mode: string }>("POST", "/api/v1/pin/unlock", { pin }),
+  pinDisable: () =>
+    request<{ success: boolean; initialized: boolean }>("POST", "/api/v1/pin/disable"),
 
   // ===== People =====
   people: () => request<any[]>("GET", "/api/v1/people"),

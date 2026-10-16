@@ -1,0 +1,103 @@
+import { useState } from "react";
+import { View, Text, ScrollView, TouchableOpacity, useWindowDimensions } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
+import { Screen } from "@/components/Screen";
+import { METHOD_CARDS, ACADEMY_FOOTER, type MethodCard } from "@/constants/methodologies";
+
+const CARD_GRADIENTS: [string, string][] = [
+  ["#FFD9CE", "#FFEFE9"], // 非暴力沟通 - 珊瑚暖
+  ["#D4E1F2", "#EDF2FA"], // 关键对话 - 雾蓝
+  ["#F3E3D8", "#FBF3EC"], // 课题分离 - 暖米
+  ["#E7DFEF", "#FAF5FC"], // 表达频道 - 雾紫
+];
+
+function MethodPage({ card, index }: { card: MethodCard; index: number }) {
+  const [from, to] = CARD_GRADIENTS[index % CARD_GRADIENTS.length];
+  return (
+    <View className="w-full px-4 py-2">
+      <LinearGradient colors={[from, to]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} className="rounded-[28px] p-6">
+        <Text className="text-[11px] font-medium text-foreground/50">沟通方法论 · 卡{index + 1}</Text>
+        <Text className="mt-1 text-[26px] font-bold text-foreground">{card.title}</Text>
+        <Text className="mt-1 text-[12px] text-foreground/60">来源：{card.source}</Text>
+
+        <View className="mt-4 rounded-2xl bg-surface/80 p-4">
+          <Text className="text-[12px] font-semibold text-accent">适用场景</Text>
+          <Text className="mt-1 text-[13px] leading-5 text-foreground">{card.scene}</Text>
+        </View>
+
+        <Text className="mt-5 text-[13px] font-semibold text-foreground">核心原则</Text>
+        <View className="mt-2 space-y-3">
+          {card.core.map((line, i) => (
+            <View key={i} className="flex-row gap-2.5">
+              <View className="mt-1.5 h-1.5 w-1.5 rounded-full bg-accent" />
+              <Text className="flex-1 text-[13px] leading-[21px] text-foreground/85">{line}</Text>
+            </View>
+          ))}
+        </View>
+
+        <View className="mt-5 rounded-2xl border border-border bg-surface/70 p-4">
+          <Text className="text-[12px] font-semibold text-foreground">使用要点</Text>
+          <Text className="mt-1 text-[12.5px] leading-5 text-foreground/75">{card.usage}</Text>
+          <View className="mt-3 h-px bg-border" />
+          <Text className="mt-3 text-[12px] font-semibold text-foreground">禁用提醒</Text>
+          <Text className="mt-1 text-[12.5px] leading-5 text-foreground/75">{card.forbid}</Text>
+        </View>
+
+        <View className="mt-5 rounded-2xl bg-foreground px-4 py-3">
+          <Text className="text-[13px] leading-5 text-surface">小结 · {card.summary}</Text>
+        </View>
+      </LinearGradient>
+    </View>
+  );
+}
+
+export default function AcademyScreen() {
+  const [active, setActive] = useState(0);
+  const { width } = useWindowDimensions();
+  const itemWidth = width;
+
+  return (
+    <Screen>
+      <View className="px-5 pb-2 pt-1">
+        <Text className="text-[22px] font-bold text-foreground">沟通学院</Text>
+        <Text className="mt-1 text-[12.5px] text-foreground/55">4 套沟通方法论卡片，边看边用</Text>
+      </View>
+
+      <View className="px-5 pb-3">
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+          {METHOD_CARDS.map((c, i) => (
+            <TouchableOpacity
+              key={c.id}
+              activeOpacity={0.7}
+              onPress={() => setActive(i)}
+              className={`rounded-full px-4 py-2 ${i === active ? "bg-accent" : "bg-surface"}`}
+            >
+              <Text className={`text-[12.5px] font-medium ${i === active ? "text-white" : "text-foreground/70"}`}>
+                {c.title}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
+
+      <View style={{ flex: 1 }}>
+        <ScrollView
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          onMomentumScrollEnd={(e) => setActive(Math.round(e.nativeEvent.contentOffset.x / (itemWidth || width)))}
+        >
+          {METHOD_CARDS.map((card, i) => (
+            <View key={card.id} style={{ width: itemWidth }}>
+              <MethodPage card={card} index={i} />
+            </View>
+          ))}
+        </ScrollView>
+      </View>
+
+      <View className="pb-6 pt-5">
+        <Text className="px-8 text-center text-[10.5px] leading-4 text-foreground/40">{ACADEMY_FOOTER}</Text>
+      </View>
+    </Screen>
+  );
+}

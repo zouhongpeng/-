@@ -9,6 +9,7 @@ import { useSafeRouter, useSafeSearchParams } from '@/hooks/useSafeRouter';
 import { Screen } from '@/components/Screen';
 import { api } from '@/utils/api';
 import { createFormDataFile } from '@/utils';
+import { findMethodByTitle } from '@/constants/methodologies';
 
 interface AnalyzeProps {
   person_id: string;
@@ -283,11 +284,20 @@ export default function AnalyzeScreen() {
 /** 三段结果渲染 */
 function ResultView({ result, marks, onCopy, onMark }: any) {
   const [copiedNote, setCopiedNote] = useState<string | null>(null);
+  const [openTheory, setOpenTheory] = useState<string | null>(null);
   const temp = result.temperature || {};
   const handleCopy = (t: string, key: string) => { onCopy(t); setCopiedNote(key); setTimeout(() => setCopiedNote(null), 1500); };
 
   return (
     <View className="mt-8">
+      {/* 场景识别标签 */}
+      {!!result.scene && (
+        <View className="mb-3 flex-row items-center rounded-full border border-border px-4 py-2 self-start" style={{ backgroundColor: 'rgba(255,253,251,0.92)' }}>
+          <Text className="text-[13px] text-foreground">识别场景：</Text>
+          <Text className="text-[13px] font-semibold text-accent">{result.scene}</Text>
+        </View>
+      )}
+
       {/* 关系温度 */}
       <View className="rounded-2xl border border-border px-5 py-4 flex-row items-center" style={{ backgroundColor: 'rgba(255,253,251,0.92)' }}>
         <Text className="text-[13px] text-muted">关系温度</Text>
@@ -333,6 +343,31 @@ function ResultView({ result, marks, onCopy, onMark }: any) {
                 <Text className="text-[15px] text-foreground leading-6">{s.text}</Text>
                 {!!s.reason && <Text className="text-[12px] text-muted mt-1">理由：{s.reason}</Text>}
               </TouchableOpacity>
+              {!!s.theory_tag && (
+                <View className="mt-2">
+                  <TouchableOpacity
+                    onPress={() => setOpenTheory(openTheory === `s${i}` ? null : `s${i}`)}
+                    className="flex-row items-center self-start rounded-full border border-accent/30 bg-accent/10 px-3 py-1"
+                    hitSlop={6}
+                  >
+                    <Text className="text-[12px] font-medium text-accent">依据：{s.theory_tag}</Text>
+                    <Text className="ml-1 text-[10px] text-accent/70">{openTheory === `s${i}` ? '▲' : '▼'}</Text>
+                  </TouchableOpacity>
+                  {openTheory === `s${i}` && (() => {
+                    const card = findMethodByTitle(s.theory_tag);
+                    if (!card) return null;
+                    return (
+                      <View className="mt-2 rounded-xl border border-border bg-background/60 px-3.5 py-3">
+                        <Text className="text-[12px] font-semibold text-foreground">《{card.title}》 · {card.source}</Text>
+                        <Text className="mt-1 text-[12px] leading-5 text-foreground/75">{card.summary}</Text>
+                        {card.core[0] && <Text className="mt-1 text-[12px] leading-5 text-foreground/70">· {card.core[0]}</Text>}
+                        {card.usage && <Text className="mt-1 text-[12px] leading-5 text-muted">使用要点：{card.usage}</Text>}
+                        {card.forbid && <Text className="mt-1 text-[12px] leading-5 text-muted">禁用提醒：{card.forbid}</Text>}
+                      </View>
+                    );
+                  })()}
+                </View>
+              )}
             </View>
           );
         })}

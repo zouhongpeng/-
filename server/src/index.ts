@@ -34,8 +34,10 @@ let pinInitialized: boolean | null = null;
 async function loadPinState() {
   const { data, error } = await db.from("settings").select("pin_hash, growth_mode, id").limit(1);
   if (error) throw error;
-  pinInitialized = !!(data && data.length > 0);
-  if (data && data.length > 0) sessionPinHash = data[0].pin_hash as string;
+  // 仅当「设置了 PIN」才算已初始化；未设置 PIN 时视为无需锁（单用户自用默认无锁）
+  const row = data && data.length > 0 ? data[0] : undefined;
+  pinInitialized = !!row && !!row.pin_hash;
+  sessionPinHash = (row?.pin_hash as string) || null;
 }
 
 /** 校验 4 位 PIN 签名（简单鉴权） */
@@ -45,7 +47,7 @@ function checkPin(req: Request): boolean {
 }
 
 const requirePin: express.RequestHandler = (req, res, next) => {
-  if (!pinInitialized) return next(); // 首次使用，需要先设 PIN
+  if (!pinInitialized) return next(); // 未设置 PIN：单用户自用，直通
   if (!checkPin(req)) return fail(res, "请先解锁", 401, 401);
   next();
 };
@@ -65,29 +67,51 @@ app.get("/api/v1/pin/status", async (req, res) => {
   }
 });
 
-// 首次设置 PIN（4位）
+// 设置 / 修改 PIN（4位）；未设置 PIN 时也允许补设
 app.post("/api/v1/pin/setup", async (req, res) => {
   try {
     const schema = z.object({ pin: z.string().regex(/^\d{4}$/) });
     const { pin } = schema.parse(req.body);
     const hash = sha256(pin);
-    // 若已初始化，不允许重复初始化（防覆盖）
+    // 若已设置 PIN，仅允许在解锁状态下修改（防覆盖）
     if (pinInitialized) {
       const token = req.headers["x-pin-token"] as string | undefined;
       if (token !== sessionPinHash) return fail(res, "已初始化过 PIN", 403, 403);
-      // 允许在已解锁状态下修改 PIN
       const { error } = await db.from("settings").update({ pin_hash: hash }).eq("id", 1);
       if (error) throw error;
       sessionPinHash = hash;
       return ok(res, { success: true, token: hash, growth_mode: (await getGrowthMode()) });
     }
-    const { data, error } = await db.from("settings").insert({ pin_hash: hash, growth_mode: "canned" }).select("id").single();
-    if (error) throw error;
+    // 从未设置，或关闭 PIN 后重新补设：更新既有行（若存在），否则新建
+    const { data: existing } = await db.from("settings").select("id").limit(1);
+    if (existing && existing.length > 0) {
+      const { error } = await db.from("settings").update({ pin_hash: hash }).eq("id", existing[0].id);
+      if (error) throw error;
+    } else {
+      const { data, error } = await db.from("settings").insert({ pin_hash: hash, growth_mode: "canned" }).select("id").single();
+      if (error) throw error;
+    }
     pinInitialized = true;
     sessionPinHash = hash;
     ok(res, { success: true, token: hash, growth_mode: "canned" });
   } catch (e: any) {
     fail(res, e?.message || "设置 PIN 失败", 400);
+  }
+});
+
+// 关闭 PIN 锁（清除密码；需已解锁）
+app.post("/api/v1/pin/disable", requirePin, async (req, res) => {
+  try {
+    const { data: existing } = await db.from("settings").select("id").limit(1);
+    if (existing && existing.length > 0) {
+      const { error } = await db.from("settings").update({ pin_hash: null }).eq("id", existing[0].id);
+      if (error) throw error;
+    }
+    sessionPinHash = null;
+    pinInitialized = false;
+    ok(res, { success: true, initialized: false });
+  } catch (e: any) {
+    fail(res, e?.message || "关闭 PIN 失败", 400);
   }
 });
 

@@ -12,10 +12,11 @@ LogBox.ignoreLogs([
 ]);
 
 function LockGate() {
-  const { loaded, isUnlocked } = useAuth();
+  const { loaded, initialized, isUnlocked } = useAuth();
   // PIN 未就绪前保持空白，避免闪烁
   if (!loaded) return null;
-  if (isUnlocked) return null;
+  // 未设置 PIN（可选锁，默认无锁）或已解锁 → 直通
+  if (initialized === false || isUnlocked) return null;
   return <PinScreen />;
 }
 
